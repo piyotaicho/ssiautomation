@@ -128,8 +128,11 @@ function Get-UiaAppWindow {
     if ($ProcessId -gt 0) { 
         $conditions += New-Object Windows.Automation.PropertyCondition($aeType::ProcessIdProperty, $ProcessId) 
     }
+    if ($null -ne $Name -and $Name -ne '' -and (-not $Name.Contains('*'))) {
+        $conditions += New-Object Windows.Automation.PropertyCondition($aeType::NameProperty, $Name) 
+    }
 
-    # 名前(Name)は PropertyCondition に入れず、後段のフィルタリング（Get-UiaControl内の-like）に任せる
+    # ワイシャツをもつ名前(Name)は PropertyCondition に入れず、後段のフィルタリング（Get-UiaControl内の-like）に任せる
     # ただし、PIDもNameも指定がない場合は、TrueConditionにしておく
     $finalCond = if ($conditions.Count -gt 1) {
         New-Object Windows.Automation.AndCondition(,[Windows.Automation.Condition[]]$conditions)
@@ -139,8 +142,12 @@ function Get-UiaAppWindow {
         [Windows.Automation.Condition]::TrueCondition
     }
 
-    # 2. Get-UiaControl を呼び出す。ここで $Name を渡せば、内部の Where-Object でワイルドカードが処理される
-    return Get-UiaControl -Parent $root -Condition $finalCond -Name $Name -Scope Children
+    # 2. Get-UiaControl を呼び出す。ここでワイルドカードを含む $Name を渡せば、内部の Where-Object でワイルドカードが処理される
+    if ($null -ne $Name -and $Name -ne '' -and (-not $Name.Contains('*'))) {
+        return Get-UiaControl -Parent $root -Condition $finalCond -Scope Children
+    } else {
+        return Get-UiaControl -Parent $root -Name $Name -Condition $finalCond -Scope Children
+    }
 }
 
 # 任意の親要素（Windowなど）の下にある子要素を探す
@@ -255,7 +262,9 @@ function GetAppWindow {
 
     $window = $null
     # 既に起動していたらウィンドウを取得して返す
-    $window = Get-UiaAppWindow -Name $Name -ErrorAction SilentlyContinue
+    try {
+        $window = Get-UiaAppWindow -Name $Name
+    } catch {}
 
     if ($null -ne $window) {
         return $window
@@ -266,7 +275,9 @@ function GetAppWindow {
         write-host "アプリを起動します: $ExecutablePath"
         $process = Start-Process -FilePath $ExecutablePath
         Start-UiaSleep -Sec 5 # 起動待ち
-        $window = Get-UiaAppWindow -Name $Name -ProcessId $process.Id -ErrorAction SilentlyContinue
+        try {
+            $window = Get-UiaAppWindow -Name $Name -ProcessId $process.Id
+        } catch {}
     }
     return $window
 }
