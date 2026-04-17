@@ -11,7 +11,11 @@ Add-Type -AssemblyName System.Windows.Forms
 $NyuuinGairaiList = @( "入院", "外来")
 $ShinryoukaList = @()
 
-# form objects
+# Formのコントロール定義
+$FormInitialLoading = New-Object -TypeName System.Windows.Forms.Form
+[System.Windows.Forms.Label]$LabelInitialLoading = $null
+$script:IsInitialLoadingClosed = $false
+
 $FormSetting = New-Object -TypeName System.Windows.Forms.Form
 [System.Windows.Forms.Label]$Label1 = $null
 [System.Windows.Forms.Label]$Label2 = $null
@@ -29,6 +33,58 @@ $FormSetting = New-Object -TypeName System.Windows.Forms.Form
 [System.Windows.Forms.RadioButton]$RadioCW90 = $null
 [System.Windows.Forms.TextBox]$TextID = $null
 [System.Windows.Forms.Button]$ButtonProcess = $null
+
+function ShowInitialLoading {
+    $script:IsInitialLoadingClosed = $false
+    $LabelInitialLoading = New-Object -TypeName System.Windows.Forms.Label -Property @{
+        Font     = "Meiryo UI, 11.25pt"
+        Location = "12,9"
+        Size     = "380,23"
+        Text     = "起動"
+    }
+    #
+    #FormInitialLoading
+    #
+    $FormInitialLoading.SuspendLayout()
+    $FormInitialLoading.ClientSize = '404,50'
+    $FormInitialLoading.Controls.Add($LabelInitialLoading)
+    $FormInitialLoading.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $FormInitialLoading.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+    $FormInitialLoading.Text = '連続スキャン設定'
+    $FormInitialLoading.add_FormClosed({
+            $script:IsInitialLoadingClosed = $true
+        })
+    $FormInitialLoading.ResumeLayout($true)
+    $FormInitialLoading.Show()
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+function CloseInitialLoading {
+    if ( $null -ne $FormInitialLoading -and -not $FormInitialLoading.IsDisposed ) {
+        $FormInitialLoading.Close()
+    }
+
+    $script:IsInitialLoadingClosed = $true
+}
+
+function InitializeAppEnvilonWithLoading {
+    # $initializeCommand = Get-Command -Name InitializeAppEnvilon -CommandType Function -ErrorAction SilentlyContinue
+    #if ( $null -eq $initializeCommand ) {
+    #    return
+    #}
+
+    ShowInitialLoading
+    try {
+        [System.Threading.Thread]::Sleep(1000) # 初期化処理の代わりに1秒待機
+        $LabelInitialLoading.Text = "初期化処理中..."
+        [System.Threading.Thread]::Sleep(5000) # 初期化処理の代わりに5秒待機
+    }
+    finally {
+        if ( -not $script:IsInitialLoadingClosed ) {
+            CloseInitialLoading
+        }
+    }
+}
 
 function InitializeSettingForm {
     $Label1 = New-Object -TypeName System.Windows.Forms.Label -Property @{
@@ -158,8 +214,12 @@ function InitializeSettingForm {
     $FormSetting.ResumeLayout($true)
 }
 
+. InitializeAppEnvilonWithLoading
+
 . InitializeSettingForm
 
+# 設定ウインドウ表示
 if ( $null -ne $FormSetting ) {
     $FormSetting.ShowDialog() | Out-Null
 }
+
