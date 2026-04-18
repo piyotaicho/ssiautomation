@@ -58,22 +58,23 @@ function Start-UIASleep {
         UI操作の合間に待機を挟みます。デフォルトは 200ms です。
     #>
     param(
-        [Parameter(ParameterSetName = "Milli", Position = 0)]
+        [Parameter(Position = 0)]
         [int]$Milliseconds,
 
-        [Parameter(ParameterSetName = "Sec")]
         [int]$Seconds
     )
+
+    if ($PSBoundParameters.ContainsKey('Seconds') -and $PSBoundParameters.ContainsKey('Milliseconds')) {
+        throw "-Seconds と -Milliseconds は同時に指定できません"
+    }
 
     if ($PSBoundParameters.ContainsKey('Seconds')) {
         # 秒が指定された場合
         Start-Sleep -Seconds $Seconds
-    }
-    elseif ($PSBoundParameters.ContainsKey('Milliseconds')) {
+    } elseif ($PSBoundParameters.ContainsKey('Milliseconds')) {
         # ミリ秒が指定された場合
         Start-Sleep -Milliseconds $Milliseconds
-    }
-    else {
+    } else {
         # 何も指定がない場合はデフォルトの 200ms
         Start-Sleep -Milliseconds 200
     }
@@ -386,7 +387,9 @@ function GetAppWindow {
     return $window
 }
 
-# --- [5] テストコード --- TeraTermを起動して接続ダイアログを閉じて、ヘルプのAbout TeraTermを開いて、閉じてExitする ---
+#
+# --- テストコード ---
+#
 $exePath = 'C:\Program Files (x86)\TeraPad\TeraPad.exe'
 $name_app_window = '* TeraPad'
 
