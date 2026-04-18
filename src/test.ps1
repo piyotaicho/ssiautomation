@@ -1,6 +1,55 @@
 ﻿# アセンブリのロード
 Add-Type -AssemblyName "UIAutomationClient"
 Add-Type -AssemblyName "UIAutomationTypes"
+# UIAutomationClientProvidersをロードする必要があるが、PowerShell単体ではロードできないので
+# C#コードをAdd-Typeでコンパイルして、UIAutomationClientの型を参照してUIAutomationClientProvidersの機能を呼び出す
+$sourceGetMainWindow = @"
+using System;
+using System.Text.RegularExpressions;
+using System.Windows.Automation;
+namespace UIATools
+{
+    public class Element
+    {
+        public static AutomationElement RootElement
+        {
+            get
+            {
+                return AutomationElement.RootElement;
+            }
+        }
+        public static AutomationElement GetMainWindowByName(string name) {
+            if (string.IsNullOrEmpty(name)) {
+                return null;
+            }
+
+            string escaped = Regex.Escape(name).Replace("\\*", ".*");
+            Regex wildcardRegex = new Regex("^" + escaped + "$", RegexOptions.IgnoreCase);
+            Condition cond = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window);
+            AutomationElementCollection windows = RootElement.FindAll(TreeScope.Element | TreeScope.Children, cond);
+            foreach (AutomationElement window in windows) {
+                if (wildcardRegex.IsMatch(window.Current.Name ?? string.Empty)) {
+                    return window;
+                }
+            }
+            return null;
+        }
+
+        public static AutomationElement GetMainWindowByProcessID(int processId) {
+            if (processId <= 0) {
+                return null;
+            }
+
+            Condition cond = new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window),
+                new PropertyCondition(AutomationElement.ProcessIdProperty, processId)
+            );
+            return RootElement.FindFirst(TreeScope.Element | TreeScope.Children, cond);
+        }
+    }
+}
+"@
+Add-Type -TypeDefinition $sourceGetMainWindow -Language CSharp -ReferencedAssemblies("UIAutomationClient", "UIAutomationTypes") -ErrorAction SilentlyContinue
 
 # --- [0] 版用ユーティリティ関数 ---
 function Start-UIASleep {
@@ -55,11 +104,19 @@ function Get-UIAControls {
     
     $searchCond = $Condition
     if ($null -eq $searchCond) {
-        write-host "Building search condition from parameters: Id='$Id', Name='$Name', Type='$($Type.LocalizedControlType)'"
         $conditions = @()
-        if ($Id) { $conditions += New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty, $Id) }
-        if ($Name -and -not $hasWildcardName) { write-host 'Get-UIAControls: Adding non wildcard Name condition'; $conditions += New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $Name) }
-        if ($Type) { $conditions += New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, $Type) }
+        if ($Id) { 
+            write-host "Building search condition from parameters: Id='$Id'"
+            $conditions += New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
+        }
+        if ($Name -and -not $hasWildcardName) {
+            write-host "Building search condition from parameters: Name='$Name'"
+            $conditions += New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $Name)
+        }
+        if ($Type) {
+            Write-Host "Building search condition from parameters: Type='$($Type.LocalizedControlType)'"
+            $conditions += New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, $Type)
+        }
 
         $searchCond = if ($conditions.Count -eq 0) { [Windows.Automation.Condition]::TrueCondition }
                      elseif ($conditions.Count -gt 1) { New-Object Windows.Automation.AndCondition(,[Windows.Automation.PropertyCondition[]]$conditions) }
@@ -86,7 +143,7 @@ function Get-UIAControl {
         [string]$Id, 
         [string]$Name, 
         [Windows.Automation.ControlType]$Type, 
-        [Windows.Automation.TreeScope]$Scope = ([Windows.Automation.TreeScope]::Descendants),
+        [Windows.Automation.TreeScope]$Scope = [Windows.Automation.TreeScope]::Descendants,
         [Windows.Automation.Condition]$Condition,
         [int]$TimeoutSec = 10
     )
@@ -105,11 +162,19 @@ function Get-UIAControl {
     # Conditionが未指定の場合のみ、Id, NameとTypeから組み立てる
     $searchCond = $Condition
     if ($null -eq $searchCond) {
-        write-host "Building search condition from parameters: Id='$Id', Name='$Name', Type='$($Type.LocalizedControlType)'"
         $conditions = @()
-        if ($Id) { $conditions += New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty, $Id) }
-        if ($Name) { $conditions += New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $Name) }
-        if ($Type) { $conditions += New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, $Type) }
+        if ($Id) {
+            write-host "Building search condition from parameters: Id='$Id'"
+            $conditions += New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
+        }
+        if ($Name) {
+            write-host "Building search condition from parameters: Name='$Name'"
+            $conditions += New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty, $Name)
+        }
+        if ($Type) {
+            write-host "Building search condition from parameters: Type='$($Type.LocalizedControlType)'"
+            $conditions += New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, $Type)
+        }
         
         if ($conditions.Count -gt 1) {
             # AndCondition は配列を 1 引数で渡す必要がある（先頭のカンマで配列を保持）
@@ -122,12 +187,12 @@ function Get-UIAControl {
     }
 
     # debug findall
-    $allelements = $Parent.FindAll($Scope, [Windows.Automation.Condition]::TrueCondition)
-    write-host "Dump all elements under parent: $($Parent.Current.Name)"
-    foreach ($el in $allelements) {
-        write-host "  Element: Name='$($el.Current.Name)', Id='$($el.Current.AutomationId)', Type='$($el.Current.ControlType.LocalizedControlType)'"
-    }
-    write-host "--"
+    # $allelements = $Parent.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
+    # write-host "Dump all elements under parent: $($Parent.Current.Name)"
+    # foreach ($el in $allelements) {
+    #     write-host "  Element: Name='$($el.Current.Name)', Id='$($el.Current.AutomationId)', Type='$($el.Current.ControlType.LocalizedControlType)'"
+    # }
+    # write-host "--"
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     while ($stopwatch.Elapsed.TotalSeconds -lt $TimeoutSec) {
@@ -147,32 +212,17 @@ function Get-UIAAppWindow {
         [int]$ProcessId = 0
     ) 
 
-    $aeType = [Windows.Automation.AutomationElement]
-    $root = $aeType::RootElement
-
-    # 1. 確実に判定できる「型(Window)」と「PID」だけで先に検索条件を作る
-    $conditions = @()
-    $conditions += New-Object Windows.Automation.PropertyCondition($aeType::ControlTypeProperty, [Windows.Automation.ControlType]::Window)
-
+    # 1. 確実に判定できるPIDがある場合はそれで対応
     if ($ProcessId -gt 0) { 
-        $conditions += New-Object Windows.Automation.PropertyCondition($aeType::ProcessIdProperty, $ProcessId) 
-    }
- 
-    # Nameにワイルドカードが含まれている場合は、PropertyConditionには入れず、後段のフィルタリング（Get-UIAControl内の処理）に任せる
-    $hasWildcardName = $Name.Contains('*')
-     if ($null -ne $Name -and -not $hasWildcardName) { 
-        $conditions += New-Object Windows.Automation.PropertyCondition($aeType::NameProperty, $Name) 
+        return [UIATools.Element]::GetMainWindowByProcessId($ProcessId)
     }
 
-    # PIDもNameも指定がない場合は、$conditions[0]（Window条件）だけで検索する
-    if ($conditions.Count -gt 1) {
-        $finalCond = New-Object Windows.Automation.AndCondition([Windows.Automation.Condition[]]$conditions)
-    } else {
-        $finalCond = $conditions[0]
+    # 2. Nameで検索
+    if ($null -ne $Name) {
+        return [UIATools.Element]::GetMainWindowByName($Name)
     }
 
-    # 2. Get-UIAControls を呼び出す。
-    return Get-UIAControls -Parent $root -Name $Name -Condition $finalCond -Scope ([Windows.Automation.TreeScope]::Children) | Select-Object -First 1
+    return $null
 }
 
 # 任意の親要素（Windowなど）の下にある子要素を探す
@@ -185,27 +235,32 @@ function Get-UIAPanes    { param($Parent, $Id, $Name) Get-UIAControls -Parent $P
 function Get-UIAButton   { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Button) }
 function Get-UIAText     { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Text) }
 function Get-UIAEdit     { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Edit) }
-function Get-UIACheckBox { param($Parent, $Id)        Get-UIAControl -Parent $Parent -Id $Id -Type ([Windows.Automation.ControlType]::CheckBox) }
-function Get-UIAComboBox { param($Parent, $Id)        Get-UIAControl -Parent $Parent -Id $Id -Type ([Windows.Automation.ControlType]::ComboBox) }
-function Get-UIARadio    { param($Parent, $Id)        Get-UIAControl -Parent $Parent -Id $Id -Type ([Windows.Automation.ControlType]::RadioButton) }
-function Get-UIAMenuBar  { param($Parent, $Name)      Get-UIAControl -Parent $Parent -Name $Name -Type ([Windows.Automation.ControlType]::MenuBar) }
-function Get-UIAMenuItem { param($Parent, $Name)      Get-UIAControl -Parent $Parent -Name $Name -Type ([Windows.Automation.ControlType]::MenuItem) }
+function Get-UIACheckBox { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::CheckBox) }
+function Get-UIAComboBox { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::ComboBox) }
+function Get-UIARadio    { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::RadioButton) }
+function Get-UIAMenuBar  { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::MenuBar) }
+function Get-UIAMenuItem { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::MenuItem) }
 
 # --- [3] 操作・ユーティリティ関数 ---
 
 function Invoke-UIAElement {
     param([Parameter(Mandatory)] $Element)
-    if ($Element.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern, [ref]$p)) {
-        $p.Invoke()
-    } elseif ($Element.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern, [ref]$p)) {
-        $p.Toggle()
-    } else { throw "Invoke非対応の要素です" }
+    $invokePattern = $null
+    $togglePattern = $null
+    if ($Element.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern, [ref]$invokePattern)) {
+        $invokePattern.Invoke()
+    } elseif ($Element.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern, [ref]$togglePattern)) {
+        $togglePattern.Toggle()
+    } else {
+        throw "Invoke非対応の要素です"
+    }
 }
 
 function Set-UIAElementExpanded {
     param([Parameter(Mandatory)] $Element)
-    if ($Element.TryGetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$p)) {
-        $p.Expand()
+    $expandCollapsePattern = $null
+    if ($Element.TryGetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expandCollapsePattern)) {
+        $expandCollapsePattern.Expand()
     } else {
         throw "展開非対応の要素です"
     }
@@ -213,8 +268,9 @@ function Set-UIAElementExpanded {
 
 function Set-UIAElementCollapsed {
     param([Parameter(Mandatory)] $Element)
-    if ($Element.TryGetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$p)) {
-        $p.Collapse()
+    $expandCollapsePattern = $null
+    if ($Element.TryGetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expandCollapsePattern)) {
+        $expandCollapsePattern.Collapse()
     } else {
         throw "折りたたみ非対応の要素です"
     }
@@ -226,8 +282,9 @@ function Close-UIAWindow {
         throw "ウィンドウ以外の要素を閉じることはできません"
     }
 
-    if ($Element.TryGetCurrentPattern([Windows.Automation.WindowPattern]::Pattern, [ref]$p)) {
-        $p.Close()
+    $windowPattern = $null
+    if ($Element.TryGetCurrentPattern([Windows.Automation.WindowPattern]::Pattern, [ref]$windowPattern)) {
+        $windowPattern.Close()
     } else {
         throw "ウィンドウクローズ非対応の要素です"
     }
@@ -248,8 +305,9 @@ function Get-UIAName {
 
 function Set-UIAValue {
     param([Parameter(Mandatory)] $Element, [Parameter(Mandatory)] [string]$Value)
-    if ($Element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$p)) {
-        $p.SetValue($Value)
+    $valuePattern = $null
+    if ($Element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
+        $valuePattern.SetValue($Value)
     } else {
         throw "値入力非対応の要素です"
     }
@@ -266,8 +324,9 @@ function Get-UIAValue {
     )
 
     # 1. ValuePattern を持っている場合 (Edit, ComboBoxなど)
-    if ($Element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
-        return $vp.Current.Value
+    $valuePattern = $null
+    if ($Element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
+        return $valuePattern.Current.Value
     }
     
     # 2. ValuePattern がない場合 (Text, Button, ListItemなど)
@@ -318,27 +377,28 @@ function GetAppWindow {
     # 見つからない場合は新規起動する
     if ($null -ne $ExecutablePath -and (Test-Path $ExecutablePath)) {
         write-host "アプリを起動します: $ExecutablePath"
-        $process = Start-Process -FilePath $ExecutablePath
+        $process = Start-Process -FilePath $ExecutablePath -PassThru
         Start-UIASleep -Sec 5 # 起動待ち
         try {
-            $window = Get-UIAAppWindow -Name $Name -ProcessId $process.Id
+            $window = Get-UIAAppWindow -ProcessId $process.Id
         } catch {}
     }
     return $window
 }
 
 # --- [5] テストコード --- TeraTermを起動して接続ダイアログを閉じて、ヘルプのAbout TeraTermを開いて、閉じてExitする ---
-$exePath = 'C:\Program Files\VideoLAN\VLC\vlc.exe'
-$name_app_window = 'VLC*'
+$exePath = 'C:\Program Files (x86)\TeraPad\TeraPad.exe'
+$name_app_window = '* TeraPad'
 
 try {
     [Windows.Automation.AutomationElement]$appWindow = GetAppWindow -Name $name_app_window -ExecutablePath $exePath
     if ($null -eq $appWindow) {
         throw "アプリウィンドウが見つかりませんでした: Name=$name_app_window"
     }
+    Start-UIASleep -Milliseconds 300
 
-    # ヘルプ > Tera Termについて を開く
-    $menuBar = Get-UIAMenuBar -Parent $appWindow
+    # ヘルプを開く
+    $menuBar = Get-UIAMenuBar -Parent $appWindow -Id 'MenuBar'
     if ($null -eq $menuBar) {
         throw "メニューバーが見つかりませんでした"
     }
@@ -346,9 +406,10 @@ try {
     if ($null -eq $menuHelp) {
         throw "ヘルプメニューが見つかりませんでした"
     }
-    Expand-UIAElement -Element $menuHelp
+    Set-UIAElementExpanded -Element $menuHelp
+    Start-UIASleep -Milliseconds 500
 
-    $menuAbout = Get-UIAMenuItem -Parent $menuHelp -Name 'Video*'
+    $menuAbout = Get-UIAMenuItem -Parent $menuHelp -Name '*情報*'
     if ($null -eq $menuAbout) {
         throw "Aboutメニューが見つかりませんでした"
     }
@@ -356,11 +417,18 @@ try {
     Start-UIASleep -Seconds 5
 
     # Aboutダイアログを閉じる
-    $aboutDialog = Get-UIAWindow -Parent $appWindow -Name 'VideoLAN*'
-    if ($null -ne $aboutDialog) {
-        Start-UIASleep -Seconds 2
-        Close-UIAWindow -Element $aboutDialog
+    $aboutDialog = Get-UIAWindow -Parent $appWindow -Name 'バージョン情報'
+    if ($null -eq $aboutDialog) {
+        throw "Aboutダイアログが見つかりませんでした"
     }
+    Start-UIASleep -Seconds 2
+
+    $aboutCloseButton = Get-UIAButton -Parent $aboutDialog -Name 'OK'
+    if ($null -eq $aboutCloseButton) {
+        throw "Aboutダイアログの閉じるボタンが見つかりませんでした"
+    }
+    Invoke-UIAElement -Element $aboutCloseButton
+    Start-UIASleep -Milliseconds 300
 
     # アプリを終了する
     Close-UIAWindow -Element $appWindow
