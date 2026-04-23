@@ -7,10 +7,8 @@ $sourceGetMainWindow = @"
 using System;
 using System.Text.RegularExpressions;
 using System.Windows.Automation;
-namespace UIATools
+public class UIATools
 {
-    public class Element
-    {
         public static AutomationElement RootElement
         {
             get
@@ -45,11 +43,12 @@ namespace UIATools
                 new PropertyCondition(AutomationElement.ProcessIdProperty, processId)
             );
             return RootElement.FindFirst(TreeScope.Element | TreeScope.Children, cond);
-        }
     }
 }
 "@
-Add-Type -TypeDefinition $sourceGetMainWindow -Language CSharp -ReferencedAssemblies("UIAutomationClient", "UIAutomationTypes") -ErrorAction SilentlyContinue
+if (-not ([System.Management.Automation.PSTypeName]'UIATools').Type) {
+    Add-Type -TypeDefinition $sourceGetMainWindow -Language CSharp -ReferencedAssemblies("UIAutomationClient", "UIAutomationTypes")
+}
 
 # --- [0] 版用ユーティリティ関数 ---
 function Start-UIASleep {
@@ -215,12 +214,12 @@ function Get-UIAAppWindow {
 
     # 1. 確実に判定できるPIDがある場合はそれで対応
     if ($ProcessId -gt 0) { 
-        return [UIATools.Element]::GetMainWindowByProcessId($ProcessId)
+        return [UIATools]::GetMainWindowByProcessId($ProcessId)
     }
 
     # 2. Nameで検索
     if ($null -ne $Name) {
-        return [UIATools.Element]::GetMainWindowByName($Name)
+        return [UIATools]::GetMainWindowByName($Name)
     }
 
     return $null
