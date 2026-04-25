@@ -100,7 +100,7 @@ function Get-UIAControls {
         throw "Parent要素は必須です"
     }
 
-    $hasWildcardName = $Name.Contains('*')
+    $hasWildcardName = (-not [string]::IsNullOrEmpty($Name)) -and $Name.Contains('*')
     
     $searchCond = $Condition
     if ($null -eq $searchCond) {
@@ -237,14 +237,17 @@ function Get-UIAText     { param($Parent, $Id, $Name) Get-UIAControl -Parent $Pa
 function Get-UIAEdit     { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Edit) }
 function Get-UIACheckBox { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::CheckBox) }
 function Get-UIAComboBox { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::ComboBox) }
+function Get-UIAList     { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::List) }
 function Get-UIARadio    { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::RadioButton) }
 function Get-UIAMenuBar  { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::MenuBar) }
 function Get-UIAMenuItem { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::MenuItem) }
+function Get-UIADataGrid { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::DataGrid) }
+function Get-UIATable    { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Table) }
 
 # --- [3] 操作・ユーティリティ関数 ---
 
 function Invoke-UIAElement {
-    param([Parameter(Mandatory)] $Element)
+    param([Parameter(Mandatory, Position = 0)] $Element)
     $invokePattern = $null
     $togglePattern = $null
     if ($Element.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern, [ref]$invokePattern)) {
@@ -257,7 +260,7 @@ function Invoke-UIAElement {
 }
 
 function Set-UIAElementExpanded {
-    param([Parameter(Mandatory)] $Element)
+    param([Parameter(Mandatory, Position = 0)] $Element)
     $expandCollapsePattern = $null
     if ($Element.TryGetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expandCollapsePattern)) {
         $expandCollapsePattern.Expand()
@@ -267,7 +270,7 @@ function Set-UIAElementExpanded {
 }
 
 function Set-UIAElementCollapsed {
-    param([Parameter(Mandatory)] $Element)
+    param([Parameter(Mandatory, Position = 0)] $Element)
     $expandCollapsePattern = $null
     if ($Element.TryGetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expandCollapsePattern)) {
         $expandCollapsePattern.Collapse()
@@ -277,7 +280,7 @@ function Set-UIAElementCollapsed {
 }
 
 function Close-UIAWindow {
-    param([Parameter(Mandatory)] $Element)
+    param([Parameter(Mandatory, Position = 0)] $Element)
     if ($Element.Current.ControlType -ne [Windows.Automation.ControlType]::Window) {
         throw "ウィンドウ以外の要素を閉じることはできません"
     }
@@ -296,7 +299,7 @@ function Get-UIAName {
         要素の Name プロパティ（Windowのタイトル、Buttonのテキスト、Textラベルなど）を取得します。
     #>
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory, Position = 0)]
         [Windows.Automation.AutomationElement]$Element
     )
 
@@ -304,7 +307,7 @@ function Get-UIAName {
 }
 
 function Set-UIAValue {
-    param([Parameter(Mandatory)] $Element, [Parameter(Mandatory)] [string]$Value)
+    param([Parameter(Mandatory, Position = 0)] $Element, [Parameter(Mandatory, Position = 1)] [string]$Value)
     $valuePattern = $null
     if ($Element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
         $valuePattern.SetValue($Value)
@@ -319,7 +322,7 @@ function Get-UIAValue {
         Text, Edit, ListItem などの要素から表示されている文字列を取得します。
     #>
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory, Position = 0)]
         [Windows.Automation.AutomationElement]$Element
     )
 
@@ -339,7 +342,7 @@ function Get-UIAComboBoxItems {
     .SYNOPSIS
         コンボボックスを展開し、内部のアイテム一覧を String[] として取得します。
     #>
-    param([Parameter(Mandatory)] [Windows.Automation.AutomationElement]$ComboBox)
+    param([Parameter(Mandatory, Position = 0)] [Windows.Automation.AutomationElement]$ComboBox)
     $expandPattern = $true
     try {
         Set-UIAElementExpanded -Element $ComboBox
@@ -355,6 +358,57 @@ function Get-UIAComboBoxItems {
         Set-UIAElementCollapsed -Element $ComboBox
     }
     return [string[]]$itemNames
+}
+
+function Get-UIAListItems {
+    <#
+    .SYNOPSIS
+        リストコントロールのアイテム一覧を String[] として取得します。
+    #>
+    param([Parameter(Mandatory, Position = 0)] [Windows.Automation.AutomationElement]$List)
+    $listItems = Get-UIAControls -Parent $List -Type ([Windows.Automation.ControlType]::ListItem) -Scope Descendants
+    return [string[]]($listItems | ForEach-Object { $_.Current.Name })
+}
+
+function Get-UIATableContents {
+    <#
+    .SYNOPSIS
+        TableやDataGridの内容を headerとvaluesで取得します。
+        ヘッダーが無い場合、headerは空配列になります。
+    #>
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [Alias('Table', 'DataGrid')]
+        [Windows.Automation.AutomationElement]$Element
+    )
+
+    $supportedControlTypes = @(
+        [Windows.Automation.ControlType]::Table,
+        [Windows.Automation.ControlType]::DataGrid
+    )
+    if ($supportedControlTypes -notcontains $Element.Current.ControlType) {
+        throw "Get-UIATableContents は Table または DataGrid 要素のみ対応しています"
+    }
+
+    $headers = Get-UIAControls -Parent $Element -Type ([Windows.Automation.ControlType]::Header) -Scope Descendants
+    $headerNames = foreach ($header in $headers) { $header.Current.Name }
+    $rows = Get-UIAControls -Parent $Element -Type ([Windows.Automation.ControlType]::DataItem) -Scope Descendants
+    $values = foreach ($row in $rows) {
+        # 多くの実装では DataItem の直下がセルだが、実装差異を考慮して子要素優先 + 子孫要素へフォールバックする
+        $cells = Get-UIAControls -Parent $row -Scope Children -Condition ([Windows.Automation.Condition]::TrueCondition)
+        if ($cells.Count -eq 0) {
+            $cells = Get-UIAControls -Parent $row -Scope Descendants -Condition ([Windows.Automation.Condition]::TrueCondition)
+        }
+
+        $cellValues = foreach ($cell in $cells) {
+            Get-UIAValue -Element $cell
+        }
+        ,$cellValues # 2次元配列にするため、行ごとにカンマで配列化
+    }
+    return @{
+        Header = [string[]]$headerNames
+        Values = [string[][]]$values
+    }
 }
 
 # --- [4] UIオートメーション複合関数 ---
