@@ -1,7 +1,7 @@
 ﻿# PowerShell UIautomation helper functions
-# last updated: 2026-05-07
+# last modified: 2026-05-10
 
-# アセンブリのロード
+# アセンブリのロード-
 Add-Type -AssemblyName "UIAutomationClient"
 Add-Type -AssemblyName "UIAutomationTypes"
 Add-Type -AssemblyName WindowsBase
@@ -29,15 +29,33 @@ public class UIATools
             public IntPtr dwExtraInfo;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        struct KEYBDINPUT {
+            public ushort wVk;
+            public ushort wScan;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
         [StructLayout(LayoutKind.Explicit)]
         struct INPUT {
             [FieldOffset(0)] public int type;
+            //
             [FieldOffset(8)] public MOUSEINPUT mi;
+            [FieldOffset(8)] public KEYBDINPUT ki;
             // 64bit環境でのサイズ調整として、FieldOffsetを8にしている
             // 32bit環境ではFieldOffset(4)にする必要がある
         }
 
         // Import Win32 APIs
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        static extern IntPtr GetForegroundWindow();
+
         [DllImport("user32.dll")]
         static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
@@ -48,13 +66,16 @@ public class UIATools
         static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
         [DllImport("user32.dll")]
-        static extern bool SetCursorPos(int x, int y);
-
-        [DllImport("user32.dll")]
-        static extern IntPtr GetMessageExtraInfo();
-
-        [DllImport("user32.dll")]
         static extern int GetSystemMetrics(int nIndex);
+
+        [DllImport("imm32.dll")]
+        static extern IntPtr ImmGetContext(IntPtr hWnd);
+
+        [DllImport("imm32.dll")]
+        static extern bool ImmSetOpenStatus(IntPtr hIMC, bool fOpen);
+
+        [DllImport("imm32.dll")]
+        static extern bool ImmReleaseContext(IntPtr hWnd, IntPtr hIMC);
 
         private const uint WK_LBUTTON     = 0x0001;
         private const uint WM_LBUTTONDOWN = 0x0201;
@@ -65,6 +86,9 @@ public class UIATools
         private const uint MOUSEEVENTF_LEFTUP   = 0x0004;
         private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
 
+        private const uint KEYEVENTF_KEYDOWN = 0x0000;
+        private const uint KEYEVENTF_KEYUP   = 0x0002;
+
         private const int SM_CXSCREEN = 0;
         private const int SM_CYSCREEN = 1;
 
@@ -74,6 +98,27 @@ public class UIATools
             {
                 return AutomationElement.RootElement;
             }
+        }
+
+        // AutomationElementが有効かを確認するユーティリティ関数
+        public static bool IsAlive(AutomationElement element) {
+            if (element == null) return false;
+
+            try {
+                object hwndProp = element.GetCurrentPropertyValue(AutomationElement.NativeWindowHandleProperty);
+
+                if (hwndProp != null) {
+                    int hwndInt = (int)hwndProp;
+                    if (hwndInt != 0) {
+                        IntPtr hWnd = (IntPtr)hwndInt;
+                        return IsWindow(hWnd);
+                    }
+                }
+            } catch (ElementNotAvailableException) {
+                // elementが既に消滅している
+                return false;
+            }
+            return false;
         }
 
         // 名前にワイルドカード(*)を使用してトップレベルウインドウを取得するユーティリティ関数
@@ -103,6 +148,19 @@ public class UIATools
             Condition cond = new AndCondition(
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window),
                 new PropertyCondition(AutomationElement.ProcessIdProperty, processId)
+            );
+            return RootElement.FindFirst(TreeScope.Element | TreeScope.Children, cond);
+        }
+
+        // オートメーションIDからトップレベルウインドウを取得するユーティリティ関数
+        public static AutomationElement GetMainWindowByAutomationID(string automationId) {
+            if (string.IsNullOrEmpty(automationId)) {
+                return null;
+            }
+
+            Condition cond = new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window),
+                new PropertyCondition(AutomationElement.AutomationIdProperty, automationId)
             );
             return RootElement.FindFirst(TreeScope.Element | TreeScope.Children, cond);
         }
@@ -164,16 +222,33 @@ public class UIATools
             SendInput(1, mouseInputs, Marshal.SizeOf(new INPUT()));
         }
 
+        // IMEの状態をoffにする
+        // 最前面のウインドウに限るのでコントロールにSetFocus()してウインドウを前面に移動しておく対応が必要。
+        public static void DisableIME() {
+            IntPtr hWnd = GetForegroundWindow();
+            if (hWnd == IntPtr.Zero) return;
+
+            // IMEコンテキストの取得
+            IntPtr hIMC = ImmGetContext(hWnd);
+            if (hIMC != IntPtr.Zero) {
+                // IME off
+                ImmSetOpenStatus(hIMC, false);
+
+                // IMEコンテキストを開放
+                ImmReleaseContext(hWnd, hIMC);
+            }
+        }
+
         // デフォルトは 200ms の待機を提供するユーティリティ関数
-        public static void sleep() {
+        public static void Sleep() {
             Thread.Sleep(200);
         }
 
-        public static void sleep(int milliseconds) {
+        public static void Sleep(int milliseconds) {
             Thread.Sleep(milliseconds);
         }
 
-        public static void sleep(int? milliseconds, int? seconds) {
+        public static void Sleep(int? milliseconds, int? seconds) {
             if (seconds.HasValue && milliseconds.HasValue) {
                 throw new Exception("-Seconds と -Milliseconds は同時に指定できません");
             }
@@ -345,7 +420,7 @@ function Get-UIAControl {
         # write-host 'Finding'
         $element = $Parent.FindFirst($Scope, $searchCond)
         if ($null -ne $element) { return $element }
-        [UIATools]::sleep(500)
+        [UIATools]::Sleep(300)
     }
     throw "要素取得タイムアウト: Name=$Name, Id=$Id"
 }
@@ -356,11 +431,12 @@ function Get-UIAControl {
 function Get-UIAAppWindow { 
     <#
     .SYNOPSIS
-        デスクトップ直下からアプリウィンドウを探します。名前またはPIDで指定可能です。
+        デスクトップ直下からアプリウィンドウを探します。名前, オートメーションIDまたはPIDで指定可能です。
         GetMainWindow*のラッパー。
     #>
     param(
         [string]$Name,
+        [string]$Id,
         [int]$ProcessId = 0
     ) 
 
@@ -369,8 +445,13 @@ function Get-UIAAppWindow {
         return [UIATools]::GetMainWindowByProcessId($ProcessId)
     }
 
-    # 2. Nameで検索
-    if ($null -ne $Name) {
+    # 2. AutomationIdで検索
+    if ($Id) {
+        return [UIATools]::GetMainWindowByAutomationID($Id)
+    }
+
+    # 3. Nameで検索
+    if ($Name) {
         return [UIATools]::GetMainWindowByName($Name)
     }
 
@@ -387,6 +468,7 @@ function Get-UIAPanes       { param($Parent, $Id, $Name) Get-UIAControls -Parent
 function Get-UIAChildPanes  { param($Parent, $Id, $Name) Get-UIAControls -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Pane) -Scope ([Windows.Automation.TreeScope]::Children) }
 
 function Get-UIAButton      { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Button) }
+function Get-UIAButtons     { param($Parent, $Id, $Name) Get-UIAControls -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Button) }
 function Get-UIAText        { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Text) }
 function Get-UIADocument    { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Document) }
 function Get-UIAEdit        { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Edit) }
@@ -401,6 +483,7 @@ function Get-UIAChildRadios { param($Parent, $Id, $Name) Get-UIAControls -Parent
 function Get-UIAMenuBar     { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::MenuBar) }
 function Get-UIAMenuItem    { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::MenuItem) }
 function Get-UIADataGrid    { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::DataGrid) }
+function Get-UIADataItems   { param($Parent, $Id, $Name) Get-UIAControls -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::DataItem) }
 function Get-UIATable       { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Table) }
 
 # --- [3] 操作・ユーティリティ関数 ---
@@ -477,6 +560,25 @@ function Set-UIAElementCollapsed {
     }
 }
 
+function Set-UIAWindowActive {
+    <#
+    .SYNOPSIS
+        UIオートメーションのウィンドウを最前面にします。WindowPatternを使用します。
+    #>
+    param([Parameter(Mandatory, Position = 0)] $Element)
+    if ($Element.Current.ControlType -ne [Windows.Automation.ControlType]::Window) {
+        throw "ウィンドウ以外の要素を操作できません"
+    }
+
+    $windowPattern = $null
+    if ($Element.TryGetCurrentPattern([Windows.Automation.WindowPattern]::Pattern, [ref]$windowPattern)) {
+        $windowPattern.SetWindowVisualState([Windows.Automation.WindowVisualState]::Normal)
+        $Element.SetFocus()
+    } else {
+        throw "ウィンドウステート更新非対応の要素です"
+    }
+}
+
 function Close-UIAWindow {
     <#
     .SYNOPSIS
@@ -508,20 +610,6 @@ function Get-UIAName {
     return $Element.Current.Name
 }
 
-function Set-UIAValue {
-    <#
-    .SYNOPSIS
-        UIオートメーションの要素に値を設定します。ValuePatternを使用します。
-    #>
-    param([Parameter(Mandatory, Position = 0)] $Element, [Parameter(Mandatory, Position = 1)] [string]$Value)
-    $valuePattern = $null
-    $Element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)
-    if ($null -eq $valuePattern) {
-        throw "値入力非対応の要素です"
-    }
-    $valuePattern.SetValue($Value)
-}
-
 function Get-UIAValue {
     <#
     .SYNOPSIS
@@ -543,6 +631,40 @@ function Get-UIAValue {
     return Get-UIAName $Element
 }
 
+function Set-UIAValue {
+    <#
+    .SYNOPSIS
+        UIオートメーションの要素に値を設定します。基本的にValuePatternを使用します。
+        -ForceでSendWaitで強制的にコントロールに送信します。
+    #>
+    param(
+        [Parameter(Mandatory, Position = 0)] $Element,
+        [Parameter(Mandatory, Position = 1)] [string]$Value,
+        [switch]$Force = $false,
+        [switch]$OmitEscape = $false
+    )
+
+    if ($Force -eq $false) {
+        $valuePattern = $null
+        $Element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)
+        if ($null -eq $valuePattern) {
+            throw "値入力非対応の要素です"
+        }
+        $valuePattern.SetValue($Value)
+    } else {
+        # コントロールにSendKey.SendWaitで送信する
+        $Element.SetFocus()
+        [UIATools]::Sleep(50)
+
+        if ($OmitEscape) {
+            [System.Windows.Forms.SendKeys]::SendWait($Value)
+        } else {
+            # SendKeysのコントロール文字列をエスケープして送信
+            [System.Windows.Forms.SendKeys]::Send(($Value -replace '([+^%~(){}\[\]])','{$1}'))
+        }
+    }
+}
+
 function Get-UIAComboBoxItems {
     <#
     .SYNOPSIS
@@ -552,7 +674,7 @@ function Get-UIAComboBoxItems {
     $expandPattern = $true
     try {
         Set-UIAElementExpanded -Element $ComboBox
-        [UIATools]::Sleep(200) # 展開待ち
+        [UIATools]::Sleep() # 展開待ち
     } catch {
         $expandPattern = $false
     }
@@ -635,9 +757,9 @@ function Get-UIATableContents {
         throw "Get-UIATableContents は Table または DataGrid 要素のみ対応しています"
     }
 
-    $headers = Get-UIAControls -Parent $Element -Type ([Windows.Automation.ControlType]::Header) -Scope [Windows.Automation.TreeScope]::Descendants
-    $headerNames = foreach ($header in $headers) { $header.Current.Name }
-    $rows = Get-UIAControls -Parent $Element -Type ([Windows.Automation.ControlType]::DataItem) -Scope [Windows.Automation.TreeScope]::Descendants
+    $headers = Get-UIAControls -Parent $Element -Type ([Windows.Automation.ControlType]::Header) -Scope ([Windows.Automation.TreeScope]::Descendants)
+    $headerNames = foreach ($header in $headers) { Get-UIAValue $header }
+    $rows = Get-UIAControls -Parent $Element -Type ([Windows.Automation.ControlType]::DataItem) -Scope ([Windows.Automation.TreeScope]::Descendants)
     $values = foreach ($row in $rows) {
         # 多くの実装では DataItem の直下がセルだが、実装差異を考慮して子要素優先 + 子孫要素へフォールバックする
         $cells = Get-UIAControls -Parent $row -Scope [Windows.Automation.TreeScope]::Children -Condition ([Windows.Automation.Condition]::TrueCondition)
@@ -646,7 +768,7 @@ function Get-UIATableContents {
         }
 
         $cellValues = foreach ($cell in $cells) {
-            Get-UIAValue -Element $cell
+            Get-UIAValue $cell
         }
         ,$cellValues # 2次元配列にするため、行ごとにカンマで配列化
     }
@@ -675,7 +797,7 @@ function GetAppWindow {
     }
 
     # 見つからない場合は新規起動する
-    if ($null -ne $ExecutablePath -and (Test-Path $ExecutablePath)) {
+    if ($ExecutablePath -and (Test-Path $ExecutablePath)) {
         # write-host "アプリを起動します: $ExecutablePath"
         $process = Start-Process -FilePath $ExecutablePath -PassThru
         [UIATools]::Sleep(5000) # 起動待ち
