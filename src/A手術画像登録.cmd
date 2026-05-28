@@ -1,0 +1,1 @@
+powershell.exe -executionpolicy bypass -c "Y:\病院\医局\産婦人科\やまもと\解析\U手術画像.ps1 | Y:\病院\医局\産婦人科\やまもと\解析\A文書管理で画像ファイルを保存.ps1 -Title '手術画像' -KaCode '産婦人科' -Nyuugai '入院'"

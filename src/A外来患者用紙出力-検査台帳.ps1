@@ -1,0 +1,115 @@
+﻿#
+# 外来 - 検査台帳を出力する
+#
+# 追加アセンブリのロード
+Add-Type -AssemblyName System.Windows.Forms
+
+# オートメーションコアなどを導入
+. "$PSScriptRoot\Tools-AutomationCore.ps1"
+. "$PSScriptRoot\Tools-Entrance.ps1"
+. "$PSScriptRoot\Tools-DocumentManager.ps1"
+. "$PSScriptRoot\Tools-ExcelWindow.ps1"
+# . "$PSScriptRoot\Tools-UserInteraction.ps1"
+
+# アプリケーションウインドウ
+$appBunsyo = $null # 文書管理
+
+try {
+    # エントランスから情報を取得する
+    $entranceGairai = Get-GairaiList
+
+    if ($entranceGairai.List.Count -eq 0) {
+        throw '処理対象がありません'
+    }
+
+    # 文書管理を起動
+    $appBunsyo = Get-DocumentManager
+
+    # ループ
+    $setteiWindow = $null
+    foreach($row in $entranceGairai.List) {
+        # CSVから情報を取得
+        [string]$Id = $row.'患者コード'
+        [string]$TimeString = $row.'予約時間'
+
+        # ダミー紹介患者 99xxxxxx はスキップする
+        if ($Id -match '^99\d{6}$') {
+            continue
+        }
+
+        # 文書管理の設定ウインドウで患者IDを設定
+        $setteiWindow = Get-DMSetteiWindow -AppWindow $appBunsyo
+        if ($null -eq $setteiWindow) {
+            throw '文書管理の状態が異常です'
+        }
+        Set-DMSetteiWindow -setteiWindow $setteiWindow -kanjyaId $Id | Out-Null
+
+        # 新規文書作成前のエクセルのプロセス状況を取得
+        $excelPIDs = (Get-Process -Name excel -ErrorAction SilentlyContinue).Id
+
+        # 新規文書を作成
+        New-DMDocument -appWindow $appBunsyo -documentName '検査結果用紙台帳' | Out-Null
+
+        # 直近で起動した有効なExcelのPIDを抽出
+        $newexcelPID = (((Get-Process -Name excel -ErrorAction SilentlyContinue).Id) | Where-Object { $_ -notin $excelPIDs } | Where-Object { (Get-Process -Id $_).MainWindowHandle -ne 0 })[0]
+        if ($null -eq $newexcelPID) {
+            throw '有効なExcelプロセスの取得に失敗しました'
+        }
+
+        # COMオブジェクトを取得
+        $excel = $null
+        $activesheet = $null
+
+        $hwndExcel = (Get-Process -Id $newexcelPID).MainWindowHandle
+        $excel = [ExcelWindowFactory]::GetExcelApplicationFromHwnd($hwndExcel)
+        [UIATools]::Sleep()
+
+        if ($null -eq $excel) {
+            throw 'Excelのコントロール取得に失敗しました'
+        }
+
+        try {
+            # 日付を取得していたら日付をセルに入力
+            if ($entranceGairai.Date) {
+                $activesheet = $excel.ActiveSheet
+                if ($timeString) {
+                    $activesheet.Range('R7').Value2 = "$($entranceGairai.Date) ($($timeString))"
+                } else {
+                    $activesheet.Range('R7').Value2 = "$($entranceGairai.Date)"
+                }
+                [System.Runtime.InteropServices.Marshal]::ReleaseComObject($activesheet) | Out-Null
+                $activesheet = $null
+            }
+
+            # 印刷
+            $excel.Sheets[1].PrintOut(1, $true)
+
+            # 保存せず終了
+            # 文書管理標準Excelテンプレートが用意しているクリニカルパス対応用の機能を利用して保存フラグチェックを回避
+            try {
+                $excel.Run('GlobalExcel.CriticalpClose')
+            }
+            catch {}
+            $excel.ActiveWorkbook.Close($false)
+            $excel.Quit()
+        } catch {
+            throw $_
+        } finally {
+            # COMオブジェクトメモリ解放
+            try {
+                [System.Runtime.InteropServices.Marshal]::ReleaseComObject($activesheet) | Out-Null
+                $activesheet = $null
+            } catch {}
+            try {
+                [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
+                $excel = $null
+            } catch {}
+        }
+    }
+
+    # 文書管理を終了する
+    Close-DocumentManager $appBunsyo | Out-Null
+} catch {
+    # Invoke-AlertDialog -text $_.Exception.Message -title '用紙出力'
+    throw $_
+}
