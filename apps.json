@@ -1,0 +1,21 @@
+﻿[
+    {
+        "Name":  "メモ帳",
+        "Path":  "notepad.exe"
+    },
+    {
+        "Name":  "電卓",
+        "Path":  "calc.exe",
+        "ProcessNames":  [
+                             "CalculatorApp"
+                         ]
+    },
+    {
+        "Name":  "ペイント",
+        "Path":  "mspaint.exe"
+    },
+    {
+        "Name":  "存在しないアプリ",
+        "Path":  "C:\\invalid_path\\error.exe"
+    }
+]
