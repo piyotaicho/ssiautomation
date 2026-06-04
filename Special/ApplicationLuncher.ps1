@@ -1,5 +1,6 @@
 ﻿param (
-    [string]$JsonPath = "apps.json"
+    [string]$JsonPath = "apps.json",
+    [string]$Title = "部門用 アプリケーション・ランチャー"
 )
 
 # 1. 必要なアセンブリのロード
@@ -8,7 +9,7 @@ Add-Type -AssemblyName PresentationFramework, System.Windows.Forms, WindowsBase,
 # 2. サンプルJSONファイルの自動生成（ファイルがない場合のみ）
 if (-not (Test-Path $JsonPath)) {
     $sampleJson = @(
-        @{ Name = "メモ帳"; Path = "C:\Windows\notepad.exe"; ProcessNames = @("Notepad") },
+        @{ Name = "メモ帳"; Path = "C:\Windows\notepad.exe"; ProcessNames = @("Notepad"); Arguments = @() },
         @{ Name = "電卓"; Path = "C:\Windows\System32\calc.exe"; ProcessNames = @("CalculatorApp") },
         @{ Name = "ペイント"; Path = "C:\Windows\System32\mspaint.exe" },
         @{ Name = "存在しないアプリ"; Path = "C:\invalid_path\error.exe" }
@@ -18,12 +19,17 @@ if (-not (Test-Path $JsonPath)) {
 
 $AppList = Get-Content $JsonPath -Raw | ConvertFrom-Json
 
+$windowTitle = $Title
+if ([string]::IsNullOrWhiteSpace($windowTitle)) {
+    $windowTitle = "部門用 アプリケーション・ランチャー"
+}
+
 # 3. 画面レイアウト (XAML)
 # WindowStyle="SingleBorderWindow" (標準枠) にし、AllowsTransparencyを外すことでタイトルバーを維持。
 # 代わりに、ウィンドウ全体の不透明度を Opacity="0.9"、背景を #99000000（透過）に調整。
 $xml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        Title="部門用 アプリケーション・ランチャー" 
+    Title="$windowTitle" 
         WindowStyle="SingleBorderWindow" 
         ResizeMode="CanMinimize"
         WindowStartupLocation="CenterScreen" 
@@ -105,10 +111,115 @@ function Get-AppProcessNames ([object]$tile, [string]$resolvedPath) {
     return $names | Select-Object -Unique
 }
 
+function Get-AppArguments ([object]$tile) {
+    $args = @()
+
+    if ($null -eq $tile) {
+        return $args
+    }
+
+    # 推奨: Arguments。後方互換で CommandLineOptions も受け付ける。
+    $source = $tile.Arguments
+    if ($null -eq $source) {
+        $source = $tile.CommandLineOptions
+    }
+
+    if ($null -eq $source) {
+        return $args
+    }
+
+    if ($source -is [string]) {
+        if (-not [string]::IsNullOrWhiteSpace($source)) {
+            $args += $source
+        }
+    } else {
+        foreach ($arg in $source) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$arg)) {
+                $args += [string]$arg
+            }
+        }
+    }
+
+    return $args
+}
+
+function Normalize-ProcessExecutableName ([string]$processName) {
+    if ([string]::IsNullOrWhiteSpace($processName)) {
+        return $null
+    }
+
+    $trimmed = $processName.Trim()
+    if ($trimmed.ToLowerInvariant().EndsWith('.exe')) {
+        return $trimmed
+    }
+
+    return "$trimmed.exe"
+}
+
+function Normalize-CommandLineText ([string]$text) {
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        return ""
+    }
+
+    return ([regex]::Replace($text.Trim().ToLowerInvariant(), '\s+', ' '))
+}
+
+function Test-CommandLineIncludesArguments ([string]$actualCommandLine, [string[]]$expectedArguments) {
+    if ([string]::IsNullOrWhiteSpace($actualCommandLine)) {
+        return $false
+    }
+
+    if ($null -eq $expectedArguments -or $expectedArguments.Count -eq 0) {
+        return $true
+    }
+
+    $normalizedActual = Normalize-CommandLineText $actualCommandLine
+
+    foreach ($arg in $expectedArguments) {
+        if ([string]::IsNullOrWhiteSpace($arg)) {
+            continue
+        }
+
+        $normalizedExpected = Normalize-CommandLineText ([string]$arg)
+        if ([string]::IsNullOrWhiteSpace($normalizedExpected)) {
+            continue
+        }
+
+        $escaped = [System.Management.Automation.WildcardPattern]::Escape($normalizedExpected)
+        if ($normalizedActual -notlike "*$escaped*") {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Test-AppIsRunning ([object]$tile, [string]$resolvedPath) {
     $processNames = Get-AppProcessNames $tile $resolvedPath
+    $arguments = Get-AppArguments $tile
+
+    if ($arguments.Count -gt 0) {
+        foreach ($name in $processNames) {
+            $exeName = Normalize-ProcessExecutableName $name
+            if ([string]::IsNullOrWhiteSpace($exeName)) {
+                continue
+            }
+
+            $escapedExeName = $exeName.Replace("'", "''")
+            $processes = Get-CimInstance -ClassName Win32_Process -Filter "Name='$escapedExeName'" -ErrorAction SilentlyContinue
+            foreach ($proc in $processes) {
+                if (Test-CommandLineIncludesArguments $proc.CommandLine $arguments) {
+                    return $true
+                }
+            }
+        }
+
+        return $false
+    }
+
     foreach ($name in $processNames) {
-        if (Get-Process -Name $name -ErrorAction SilentlyContinue) {
+        $lookupName = [System.IO.Path]::GetFileNameWithoutExtension($name)
+        if (Get-Process -Name $lookupName -ErrorAction SilentlyContinue) {
             return $true
         }
     }
@@ -198,7 +309,12 @@ foreach ($app in $AppList) {
                 $resolvedPath = Resolve-AppExecutablePath $targetApp.Path
                 if ($resolvedPath) {
                     if (-not (Test-AppIsRunning $targetApp $resolvedPath)) {
-                        Start-Process $resolvedPath
+                        $arguments = Get-AppArguments $targetApp
+                        if ($arguments.Count -gt 0) {
+                            Start-Process $resolvedPath -ArgumentList $arguments
+                        } else {
+                            Start-Process $resolvedPath
+                        }
                     }
                 }
                 $Global:IdleCounter = 0
@@ -216,6 +332,8 @@ foreach ($app in $AppList) {
         Name     = $app.Name
         Path     = $app.Path
         ProcessNames = $app.ProcessNames
+        Arguments = $app.Arguments
+        CommandLineOptions = $app.CommandLineOptions
         State    = "Unknown"
     }
     $border.Tag = $tileObj
@@ -269,7 +387,12 @@ function Start-AllApplications {
                 $resolvedPath = Resolve-AppExecutablePath $tile.Path
                 if ($resolvedPath) {
                     if (-not (Test-AppIsRunning $tile $resolvedPath)) {
-                        Start-Process $resolvedPath
+                        $arguments = Get-AppArguments $tile
+                        if ($arguments.Count -gt 0) {
+                            Start-Process $resolvedPath -ArgumentList $arguments
+                        } else {
+                            Start-Process $resolvedPath
+                        }
                     }
                 }
             } catch {}
