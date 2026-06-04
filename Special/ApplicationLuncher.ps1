@@ -1,6 +1,8 @@
 ﻿param (
     [string]$JsonPath = "apps.json",
-    [string]$Title = "部門用 アプリケーション・ランチャー"
+    [string]$Title = "部門用 アプリケーション・ランチャー",
+    [Alias("NoAutoLaunch")]
+    [switch]$NoAutolunch
 )
 
 # 1. 必要なアセンブリのロード
@@ -8,13 +10,7 @@ Add-Type -AssemblyName PresentationFramework, System.Windows.Forms, WindowsBase,
 
 # 2. サンプルJSONファイルの自動生成（ファイルがない場合のみ）
 if (-not (Test-Path $JsonPath)) {
-    $sampleJson = @(
-        @{ Name = "メモ帳"; Path = "C:\Windows\notepad.exe"; ProcessNames = @("Notepad"); Arguments = @() },
-        @{ Name = "電卓"; Path = "C:\Windows\System32\calc.exe"; ProcessNames = @("CalculatorApp") },
-        @{ Name = "ペイント"; Path = "C:\Windows\System32\mspaint.exe" },
-        @{ Name = "存在しないアプリ"; Path = "C:\invalid_path\error.exe" }
-    ) | ConvertTo-Json -Depth 5
-    [System.IO.File]::WriteAllText($JsonPath, $sampleJson, [System.Text.Encoding]::UTF8)
+    throw 'JSONファイルが見つかりませんでした。'
 }
 
 $AppList = Get-Content $JsonPath -Raw | ConvertFrom-Json
@@ -62,7 +58,7 @@ $Global:Tiles = @()
 $Global:LastStateHash = ""
 $Global:IdleCounter = 0
 $Global:IsActiveTracking = $true
-$Global:AutoLaunchDone = $false
+$Global:AutoLaunchDone = $NoAutolunch.IsPresent
 
 function Resolve-AppExecutablePath ([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }
@@ -72,9 +68,19 @@ function Resolve-AppExecutablePath ([string]$path) {
     }
 
     try {
-        $cmd = Get-Command -Name $path -CommandType Application -ErrorAction Stop
-        if ($cmd -and $cmd.Source) {
-            return $cmd.Source
+        $commands = @(Get-Command -Name $path -CommandType Application -ErrorAction Stop)
+        foreach ($cmd in $commands) {
+            $source = [string]$cmd.Source
+            if (-not [string]::IsNullOrWhiteSpace($source) -and (Test-Path -LiteralPath $source -PathType Leaf)) {
+                return (Resolve-Path -LiteralPath $source).Path
+            }
+        }
+
+        if ($commands.Count -gt 0) {
+            $firstSource = [string]$commands[0].Source
+            if (-not [string]::IsNullOrWhiteSpace($firstSource)) {
+                return $firstSource
+            }
         }
     } catch {
     }
@@ -112,10 +118,10 @@ function Get-AppProcessNames ([object]$tile, [string]$resolvedPath) {
 }
 
 function Get-AppArguments ([object]$tile) {
-    $args = @()
+    $argumentValues = @()
 
     if ($null -eq $tile) {
-        return $args
+        return $argumentValues
     }
 
     # 推奨: Arguments。後方互換で CommandLineOptions も受け付ける。
@@ -125,22 +131,140 @@ function Get-AppArguments ([object]$tile) {
     }
 
     if ($null -eq $source) {
-        return $args
+        return $argumentValues
     }
 
     if ($source -is [string]) {
         if (-not [string]::IsNullOrWhiteSpace($source)) {
-            $args += $source
+            $argumentValues += $source
         }
     } else {
         foreach ($arg in $source) {
             if (-not [string]::IsNullOrWhiteSpace([string]$arg)) {
-                $args += [string]$arg
+                $argumentValues += [string]$arg
             }
         }
     }
 
-    return $args
+    return $argumentValues
+}
+
+function Get-AppArgumentSource ([object]$tile) {
+    if ($null -eq $tile) {
+        return $null
+    }
+
+    if ($null -ne $tile.Arguments) {
+        return $tile.Arguments
+    }
+
+    if ($null -ne $tile.CommandLineOptions) {
+        return $tile.CommandLineOptions
+    }
+
+    return $null
+}
+
+function Convert-ArgumentStringToArray ([string]$argumentLine) {
+    $result = @()
+    if ([string]::IsNullOrWhiteSpace($argumentLine)) {
+        return $result
+    }
+
+    # "quoted value" を1トークンとして扱い、それ以外は空白で分割する。
+    $regexMatches = [regex]::Matches($argumentLine, '"([^"\\]|\\.)*"|\S+')
+    foreach ($m in $regexMatches) {
+        $token = $m.Value
+        if ($token.Length -ge 2 -and $token.StartsWith('"') -and $token.EndsWith('"')) {
+            $token = $token.Substring(1, $token.Length - 2)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($token)) {
+            $result += $token
+        }
+    }
+
+    return $result
+}
+
+function Start-AppProcess ([string]$resolvedPath, [object]$tile) {
+    $argumentSource = Get-AppArgumentSource $tile
+    $workingDirectory = $null
+    try {
+        $candidateDirectory = [System.IO.Path]::GetDirectoryName($resolvedPath)
+        if (-not [string]::IsNullOrWhiteSpace($candidateDirectory) -and (Test-Path -LiteralPath $candidateDirectory -PathType Container)) {
+            $workingDirectory = $candidateDirectory
+        }
+    } catch {
+        $workingDirectory = $null
+    }
+
+    $startProcessArgs = @{ FilePath = $resolvedPath; ErrorAction = 'Stop' }
+    if ($null -ne $workingDirectory) {
+        $startProcessArgs.WorkingDirectory = $workingDirectory
+    }
+
+    if ($null -eq $argumentSource) {
+        Start-Process @startProcessArgs
+        return
+    }
+
+    if ($argumentSource -is [string]) {
+        if ([string]::IsNullOrWhiteSpace($argumentSource)) {
+            Start-Process @startProcessArgs
+        } else {
+            $launchErrors = @()
+
+            # 方式1: ユーザー記述どおりの文字列をそのまま渡す。
+            try {
+                Start-Process @startProcessArgs -ArgumentList $argumentSource
+                return
+            } catch {
+                $launchErrors += $_.Exception.Message
+            }
+
+            # 方式2: 引数文字列を分割して配列で渡す。
+            $parsedArguments = Convert-ArgumentStringToArray $argumentSource
+            if ($parsedArguments.Count -gt 0) {
+                try {
+                    Start-Process @startProcessArgs -ArgumentList $parsedArguments
+                    return
+                } catch {
+                    $launchErrors += $_.Exception.Message
+                }
+            }
+
+            throw [System.InvalidOperationException]::new(("引数付き起動に失敗しました。{0}" -f (($launchErrors | Select-Object -Unique) -join " / ")))
+        }
+        return
+    }
+
+    $arguments = Get-AppArguments $tile
+    if ($arguments.Count -gt 0) {
+        $launchErrors = @()
+
+        # 方式1: 配列をそのまま渡す。
+        try {
+            Start-Process @startProcessArgs -ArgumentList $arguments
+            return
+        } catch {
+            $launchErrors += $_.Exception.Message
+        }
+
+        # 方式2: 連結文字列で渡す（受け取り側仕様差の吸収）。
+        $joinedArguments = $arguments -join ' '
+        if (-not [string]::IsNullOrWhiteSpace($joinedArguments)) {
+            try {
+                Start-Process @startProcessArgs -ArgumentList $joinedArguments
+                return
+            } catch {
+                $launchErrors += $_.Exception.Message
+            }
+        }
+
+        throw [System.InvalidOperationException]::new(("引数付き起動に失敗しました。{0}" -f (($launchErrors | Select-Object -Unique) -join " / ")))
+    } else {
+        Start-Process @startProcessArgs
+    }
 }
 
 function Normalize-ProcessExecutableName ([string]$processName) {
@@ -164,6 +288,17 @@ function Normalize-CommandLineText ([string]$text) {
     return ([regex]::Replace($text.Trim().ToLowerInvariant(), '\s+', ' '))
 }
 
+function Test-ArgumentTokenMatch ([string]$actualToken, [string]$expectedToken) {
+    if ([string]::IsNullOrWhiteSpace($actualToken) -or [string]::IsNullOrWhiteSpace($expectedToken)) {
+        return $false
+    }
+
+    $actualNormalized = $actualToken.Trim().Trim('"').ToLowerInvariant()
+    $expectedNormalized = $expectedToken.Trim().Trim('"').ToLowerInvariant()
+
+    return ($actualNormalized -eq $expectedNormalized)
+}
+
 function Test-CommandLineIncludesArguments ([string]$actualCommandLine, [string[]]$expectedArguments) {
     if ([string]::IsNullOrWhiteSpace($actualCommandLine)) {
         return $false
@@ -173,20 +308,51 @@ function Test-CommandLineIncludesArguments ([string]$actualCommandLine, [string[
         return $true
     }
 
-    $normalizedActual = Normalize-CommandLineText $actualCommandLine
+    $actualTokens = Convert-ArgumentStringToArray $actualCommandLine
+    if ($actualTokens.Count -eq 0) {
+        return $false
+    }
 
-    foreach ($arg in $expectedArguments) {
-        if ([string]::IsNullOrWhiteSpace($arg)) {
+    # 先頭は実行ファイルパス想定のため除外し、純粋な引数のみで比較する。
+    $actualArguments = @()
+    if ($actualTokens.Count -gt 1) {
+        $actualArguments = $actualTokens[1..($actualTokens.Count - 1)]
+    }
+
+    $expectedTokens = @()
+    foreach ($expected in $expectedArguments) {
+        if ([string]::IsNullOrWhiteSpace([string]$expected)) {
             continue
         }
 
-        $normalizedExpected = Normalize-CommandLineText ([string]$arg)
-        if ([string]::IsNullOrWhiteSpace($normalizedExpected)) {
+        $parsed = Convert-ArgumentStringToArray ([string]$expected)
+        if ($parsed.Count -gt 0) {
+            $expectedTokens += $parsed
+        } else {
+            $expectedTokens += [string]$expected
+        }
+    }
+
+    if ($expectedTokens.Count -eq 0) {
+        return $true
+    }
+
+    $searchIndex = 0
+    foreach ($expectedToken in $expectedTokens) {
+        if ([string]::IsNullOrWhiteSpace($expectedToken)) {
             continue
         }
 
-        $escaped = [System.Management.Automation.WildcardPattern]::Escape($normalizedExpected)
-        if ($normalizedActual -notlike "*$escaped*") {
+        $matched = $false
+        for ($i = $searchIndex; $i -lt $actualArguments.Count; $i++) {
+            if (Test-ArgumentTokenMatch -actualToken $actualArguments[$i] -expectedToken $expectedToken) {
+                $matched = $true
+                $searchIndex = $i + 1
+                break
+            }
+        }
+
+        if (-not $matched) {
             return $false
         }
     }
@@ -197,8 +363,13 @@ function Test-CommandLineIncludesArguments ([string]$actualCommandLine, [string[
 function Test-AppIsRunning ([object]$tile, [string]$resolvedPath) {
     $processNames = Get-AppProcessNames $tile $resolvedPath
     $arguments = Get-AppArguments $tile
+    $hasExplicitArgumentFilter = ($null -ne $tile -and (($null -ne $tile.Arguments) -or ($null -ne $tile.CommandLineOptions)))
 
-    if ($arguments.Count -gt 0) {
+    if ($hasExplicitArgumentFilter) {
+        if ($arguments.Count -eq 0) {
+            return $false
+        }
+
         foreach ($name in $processNames) {
             $exeName = Normalize-ProcessExecutableName $name
             if ([string]::IsNullOrWhiteSpace($exeName)) {
@@ -309,19 +480,14 @@ foreach ($app in $AppList) {
                 $resolvedPath = Resolve-AppExecutablePath $targetApp.Path
                 if ($resolvedPath) {
                     if (-not (Test-AppIsRunning $targetApp $resolvedPath)) {
-                        $arguments = Get-AppArguments $targetApp
-                        if ($arguments.Count -gt 0) {
-                            Start-Process $resolvedPath -ArgumentList $arguments
-                        } else {
-                            Start-Process $resolvedPath
-                        }
+                        Start-AppProcess -resolvedPath $resolvedPath -tile $targetApp
                     }
                 }
                 $Global:IdleCounter = 0
                 $Global:IsActiveTracking = $true
                 Update-SystemState
             } catch {
-                [System.Windows.MessageBox]::Show("起動に失敗しました: $($targetApp.Path)", "Error")
+                [System.Windows.MessageBox]::Show("起動に失敗しました: $($targetApp.Path)`n$($_.Exception.Message)", "Error")
             }
         }
     })
@@ -382,21 +548,15 @@ function Update-SystemState {
 # 一括起動
 function Start-AllApplications {
     foreach ($tile in $Global:Tiles) {
-        if ($tile.State -eq "Red") {
-            try {
-                $resolvedPath = Resolve-AppExecutablePath $tile.Path
-                if ($resolvedPath) {
-                    if (-not (Test-AppIsRunning $tile $resolvedPath)) {
-                        $arguments = Get-AppArguments $tile
-                        if ($arguments.Count -gt 0) {
-                            Start-Process $resolvedPath -ArgumentList $arguments
-                        } else {
-                            Start-Process $resolvedPath
-                        }
-                    }
+        try {
+            $resolvedPath = Resolve-AppExecutablePath $tile.Path
+            if ($resolvedPath) {
+                # 色のキャッシュ値ではなく都度の起動判定を使い、引数一致まで確認する。
+                if (-not (Test-AppIsRunning $tile $resolvedPath)) {
+                    Start-AppProcess -resolvedPath $resolvedPath -tile $tile
                 }
-            } catch {}
-        }
+            }
+        } catch {}
     }
     $Global:IdleCounter = 0
     $Global:IsActiveTracking = $true
