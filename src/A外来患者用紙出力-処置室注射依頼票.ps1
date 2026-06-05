@@ -1,6 +1,12 @@
 ﻿#
 # 外来 - コメントに 注射 点滴 の記載がある場合に処置室依頼票を出力する
+# 
+# -noFilter : コメントの有無にかかわらず全症例を対象とする
 #
+param(
+    [Switch]$noFilter
+)
+
 # 追加アセンブリのロード
 Add-Type -AssemblyName System.Windows.Forms
 
@@ -9,7 +15,6 @@ Add-Type -AssemblyName System.Windows.Forms
 . "$PSScriptRoot\Tools-Entrance.ps1"
 . "$PSScriptRoot\Tools-DocumentManager.ps1"
 . "$PSScriptRoot\Tools-ExcelWindow.ps1"
-# . "$PSScriptRoot\Tools-UserInteraction.ps1"
 
 # アプリケーションウインドウ
 $appBunsyo = $null # 文書管理
@@ -38,7 +43,7 @@ try {
         }
 
         # コメントに「注射」または「点滴」が含まれていなければスキップする
-        if ($Comment -notmatch '注射|点滴') {
+        if (-not $noFilter -and $Comment -notmatch '注射|点滴') {
             continue
         }
 
@@ -55,22 +60,30 @@ try {
         # 新規文書を作成
         New-DMDocument -appWindow $appBunsyo -documentName '処置室依頼票' | Out-Null
 
-        # 直近で起動した有効なExcelのPIDを抽出
-        $newexcelPID = (((Get-Process -Name excel -ErrorAction SilentlyContinue).Id) | Where-Object { $_ -notin $excelPIDs } | Where-Object { (Get-Process -Id $_).MainWindowHandle -ne 0 })[0]
-        if ($null -eq $newexcelPID) {
-            [UIATools]::Sleep(1000) # Excelの起動が遅い場合があるため、少し待機してから再取得を試みる
-            $newexcelPID = (((Get-Process -Name excel -ErrorAction SilentlyContinue).Id) | Where-Object { $_ -notin $excelPIDs } | Where-Object { (Get-Process -Id $_).MainWindowHandle -ne 0 })[0]
-            if ($null -eq $newexcelPID) {
-                throw '有効なExcelプロセスの取得に失敗しました'
+        # 直近で起動した有効なExcelを抽出
+        $retryCount = 3
+        $newExcelHwnd = 0
+        while (($retryCount--) -gt 0) {
+            $newExcelProcs = (Get-Process -Name excel -ErrorAction SilentlyContinue | Where-Object { $_.Id -notin $excelPIDs -and $_.MainWindowHandle -ne 0})
+            if ($newExcelProcs.Count -ge 1) {
+                $newExcelHwnd = $newExcelProcs[0].MainWindowHandle
+                break
             }
+            Write-Host 'Getting Excel HWND again'
+            [UIATools]::Sleep(1000)
+            $retryCount--
+        }
+
+        if (-not $newExcelHwnd) {
+            throw '有効なExcelプロセスの取得に失敗しました'
         }
 
         # COMオブジェクトを取得
         $excel = $null
         $activesheet = $null
 
-        $hwndExcel = (Get-Process -Id $newexcelPID).MainWindowHandle
-        $excel = [ExcelWindowFactory]::GetExcelApplicationFromHwnd($hwndExcel)
+        $excel = [ExcelWindowFactory]::GetExcelApplicationFromHwnd($newExcelHwnd)
+        [UIATools]::Sleep()
 
         if ($null -eq $excel) {
             throw 'Excelのコントロール取得に失敗しました'
