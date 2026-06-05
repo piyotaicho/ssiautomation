@@ -34,6 +34,9 @@ function Get-GairaiList {
         throw 'エントランスから外来を開いてください'
     }
 
+    # ウインドウをフォアグラウンドにする
+    Set-UIAWindowActive $appAplin
+
     # エントランスの患者リストはネストが深いので探索に相当時間がかかる
     # Childernでpaneを列挙して必要な階層だけ検索する
     $paneMenu = $null
@@ -42,13 +45,22 @@ function Get-GairaiList {
     # level　1 - メニューのあるPaneを取得
     # $panes = Get-UIAControls -Parent $appAplin -Scope ([Windows.Automation.TreeScope]::Children) -Condition (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, ([Windows.Automation.ControlType]::Pane))) -TimeoutSec 1
     $panes = Get-UIAChildPanes -Parent $appAplin
+    if ($null -eq $panes) {
+        throw 'エントランスメニューPaneが取得できません'
+    }
     $paneMenu = $panes[2] # ($panes | Where-Object { $_.Current.AutomationId -eq 'pnlMainMenu' })[0]
 
     # level　2 to 3 - カレンダーを表示している部分の親Paneを取得
     # $panes = Get-UIAControls -Parent $panes[0] -Scope ([Windows.Automation.TreeScope]::Children) -Condition (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, ([Windows.Automation.ControlType]::Pane))) -TimeoutSec 1
     # $panes = Get-UIAControls -Parent $panes[0] -Scope ([Windows.Automation.TreeScope]::Children) -Condition (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, ([Windows.Automation.ControlType]::Pane))) -TimeoutSec 1
     $panes = Get-UIAChildPanes -Parent $panes[0]
+    if ($null -eq $panes) {
+        throw 'エントランスカレンダーPaneが取得できません'
+    }
     $panes = Get-UIAChildPanes -Parent $panes[0]
+    if ($null -eq $panes) {
+        throw 'エントランスカレンダーPaneが取得できません'
+    }
     $paneHeader = $panes[1] # ($panes | Where-Object { $_.Current.AutomationId -eq 'pnlHeader2' })[0]
 
     if ($null -eq $paneMenu -or $null -eq $paneHeader) {
@@ -58,7 +70,7 @@ function Get-GairaiList {
     # 表示している日付を取得
     $editAplinDate = Get-UIAEdit -Parent $paneHeader -Id 'txtDate'
     if ($null -eq $editAplinDate) {
-        throw 'エントランスの構造が想定外です'
+        throw 'エントランスのカレンダーが取得できません'
     }
     [string]$displayedDateString = Get-UIAValue $editAplinDate
 
