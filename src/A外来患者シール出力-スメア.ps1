@@ -2,13 +2,24 @@
 # 外来 - コメントにスメアと書かれたひとのシールを出す
 #
 # 追加アセンブリのロード
-Add-Type -AssemblyName PresentationFramework
-Add-Type -AssemblyName Microsoft.VisualBasic
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-
 . "$PSScriptRoot\Tools-AutomationCore.ps1"
 . "$PSScriptRoot\Tools-Entrance.ps1"
+
+# ユーティリティ関数
+function checkString {
+    param(
+        [Parameter(Mandatory)]$value
+    )
+    if ($value -match '^(.*)(スメア|すめあ)(?!(結果|けっか))(.*)$') {
+        Write-Host -NoNewline $Matches[1]
+        Write-Host -ForegroundColor Cyan -NoNewline $Matches[2]
+        Write-Host $Matches[4]
+        return $true
+    } else {
+        Write-Host $value
+        return $false
+    }
+}
 
 # アプリケーションウインドウ
 $appKanLbl = $null
@@ -56,9 +67,8 @@ try {
         $valueId = $entry.'患者コード'
         $valueComment = @($entry.'診療予約コメント', $entry.'患者一覧用コメント') -join ' '
 
-        write-host "$($valueId) コメントのチェック $($valueComment)"
-
-        if ($valueComment -match '(スメア|すめあ)(?!結果)') {
+        write-host -NoNewline "$($valueId) コメントのチェック "
+        if (checkString $valueComment) {
             $btnChange = Get-UIAButton -Parent $appKanLbl -Id '4'
             $btnCommit = Get-UIAButton -Parent $appKanLbl -Id '7'
             $editId = Get-UIAEdit -Parent $appKanLbl -Id '8'
