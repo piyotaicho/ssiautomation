@@ -1,0 +1,1 @@
+powershell.exe -executionpolicy bypass -File "Y:\病院\医局\産婦人科\やまもと\解析\A外来患者シール出力-スメア.ps1"

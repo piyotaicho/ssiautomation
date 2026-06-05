@@ -1,0 +1,1 @@
+powershell.exe -executionpolicy bypass -command ". Y:\病院\医局\産婦人科\やまもと\解析\P外来患者用紙出力-処置室注射依頼票.ps1 -noFilter"

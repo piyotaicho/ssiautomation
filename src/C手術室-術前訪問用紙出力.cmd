@@ -1,0 +1,1 @@
+powershell.exe -executionpolicy bypass -File Y:\•a‰@\ˆã‹Ç\Y•wl‰È\‚â‚Ü‚à‚Æ\‰ğÍ\Pèp—\’è-p‘O–K–â—p†o—Í.ps1
