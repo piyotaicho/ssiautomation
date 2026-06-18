@@ -186,9 +186,9 @@ try {
         $excelSheetCOM.Range('Q3').Value = $case.ishi
         # 部屋番号があるときは括弧をつける
         if ($case.room) {
-            $excelSheetCOM.Range('K3').Value = "$case.room (　)"
+            $excelSheetCOM.Range('K3').Value = "$($case.room) (　)"
         } else {
-            $excelSheetCOM.Range('K3').Value = ''
+            $excelSheetCOM.Range('K3').Value = '    (　)'
         }
 
         # 緊急チェックを選択
