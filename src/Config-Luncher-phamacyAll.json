@@ -1,0 +1,66 @@
+﻿[
+    {
+        "Name":  "接続用データー送信",
+        "Path":  "C:\\ssi\\exe\\SSI2PharmacyYak.exe"
+    },
+    {
+        "Name":  "接続用パラメーター作成",
+        "Path":  "C:\\ssi\\exe\\YAKDATPUT.exe"
+    },
+    {
+        "Name":  "服薬指導　患者属性送信",
+        "Path":  "C:\\ssi\\exe\\SSI2MDBKGY.exe"
+    },
+    {
+        "Name":  "服薬指導　算定受信",
+        "Path":  "C:\\ssi\\exe\\MDB2SSIKGY.exe"
+    },
+    {
+        "Name":  "注射システム接続（服薬指導）",
+        "Path":  "C:\\ssi\\exe\\SSIConnectIFChu.exe"
+    },
+    {
+        "Name":  "処方システム接続（服薬指導）",
+        "Path":  "C:\\ssi\\exe\\SSIConnectIFYak.exe"
+    },
+    {
+        "Name":  "外来処方箋",
+        "Path":  "C:\\ssi\\exe\\SyhsenGEX.exe",
+        "Arguments": "00"
+    },
+    {
+        "Name":  "定時処方箋",
+        "Path":  "C:\\ssi\\exe\\SyhsenNAEX.exe",
+        "Arguments": "00"
+    },
+    {
+        "Name":  "院内処方箋",
+        "Path":  "C:\\ssi\\exe\\SyhsenNBEX.exe",
+        "Arguments": "00"
+    },
+    {
+        "Name":  "持参薬処方箋",
+        "Path":  "C:\\ssi\\exe\\SyhsenNBEX.exe",
+        "Arguments": "01"
+    },
+    {
+        "Name":  "指示変更箋",
+        "Path":  "C:\\ssi\\exe\\SyhSijisenEX.exe"
+    },
+    {
+        "Name":  "注射送信条件設定",
+        "Path":  "C:\\ssi\\exe\\CyusenNBEX.exe"
+    },
+    {
+        "Name":  "外来指示箋発行",
+        "Path":  "C:\\ssi\\exe\\CyusenGEx.exe"
+    },
+    {
+        "Name":  "処方監査一覧",
+        "Path":  "C:\\ssi\\exe\\SyhView.exe"
+    },
+    {
+        "Name":  "注射監査一覧",
+        "Path":  "C:\\ssi\\exe\\CyuView.exe"
+    }
+]

@@ -1,0 +1,10 @@
+﻿[
+    {
+        "Name":  "注射送信条件設定",
+        "Path":  "C:\\ssi\\exe\\CyusenNBEX.exe"
+    },
+    {
+        "Name":  "注射監査一覧",
+        "Path":  "C:\\ssi\\exe\\CyuView.exe"
+    }
+]
