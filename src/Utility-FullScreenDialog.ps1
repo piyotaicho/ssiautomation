@@ -5,6 +5,13 @@
 
 Add-Type -AssemblyName PresentationFramework, System.Windows.Forms, WindowsBase
 
+# パラメーターを修正
+$Message = $Message.Trim('"').Trim("'")
+$Color = $Color.Trim('"').Trim("'").ToUpper()
+if ($Color -notlike '#*') {
+    $Color = '#' + $Color
+}
+
 # プライマリ画面の解像度（サイズ）を取得
 $primaryScreen = [System.Windows.Forms.Screen]::PrimaryScreen
 $screenWidth  = $primaryScreen.Bounds.Width
@@ -14,7 +21,7 @@ $xml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         Title="Error Notification" WindowStyle="None" AllowsTransparency="True" Topmost="True" 
         Left="0" Top="0" Width="$screenWidth" Height="$screenHeight"
-        Background="$Color" ShowInTaskbar="True">
+        ShowInTaskbar="True">
     
     <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
         <Border Background="#F5F5F5" CornerRadius="8" Padding="30" Width="500" Margin="20">
@@ -54,6 +61,9 @@ $xml = @"
 
 $reader = [System.Xml.XmlReader]::Create([System.IO.StringReader]$xml)
 $window = [System.Windows.Markup.XamlReader]::Load($reader)
+
+$bc = New-Object System.Windows.Media.BrushConverter
+$window.Background = $bc.ConvertFromString($Color)
 
 $btnOK = $window.FindName("BtnOK")
 $btnOK.Add_Click({

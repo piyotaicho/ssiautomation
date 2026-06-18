@@ -10,6 +10,13 @@ $primaryScreen = [System.Windows.Forms.Screen]::PrimaryScreen
 $screenWidth  = $primaryScreen.Bounds.Width
 $screenHeight = $primaryScreen.Bounds.Height
 
+# パラメーターを修正
+$Message = $Message.Trim('"').Trim("'")
+$Color = $Color.Trim('"').Trim("'").ToUpper()
+if ($Color -notlike '#*') {
+    $Color = '#' + $Color
+}
+
 $code = @"
 using System;
 using System.Runtime.InteropServices;
@@ -48,7 +55,7 @@ $xml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         Title="Overlay" WindowStyle="None" AllowsTransparency="True" Topmost="True" 
         Left="0" Top="0" Width="$screenWidth" Height="$screenHeight"
-        Background="$Color" ShowInTaskbar="False">
+        ShowInTaskbar="False">
     <Grid>
         <TextBlock Text="$Message" Foreground="White" FontSize="60" FontWeight="Bold"
                    HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.6">
@@ -62,6 +69,9 @@ $xml = @"
 
 $reader = [System.Xml.XmlReader]::Create([System.IO.StringReader]$xml)
 $window = [System.Windows.Markup.XamlReader]::Load($reader)
+
+$bc = New-Object System.Windows.Media.BrushConverter
+$window.Background = $bc.ConvertFromString($Color)
 
 $window.Add_SourceInitialized({
     [WindowHelper]::MakeTransparentAndNoActivate($this)
