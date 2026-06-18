@@ -1,5 +1,5 @@
 ﻿# PowerShell UIautomation helper functions
-# last modified: 2026-05-28
+# last modified: 2026-06-11
 
 # アセンブリのロード-
 
@@ -19,6 +19,12 @@ using System.Windows.Automation;
 
 public class UIATools
 {
+        public enum ClickType {
+            Left,
+            Right,
+            Double
+        }
+
         // Win32 structs
         [StructLayout(LayoutKind.Sequential)]
         struct MOUSEINPUT {
@@ -58,6 +64,12 @@ public class UIATools
         static extern IntPtr GetForegroundWindow();
 
         [DllImport("user32.dll")]
+        static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
+
+        [DllImport("user32.dll")]
         static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll")]
@@ -82,10 +94,12 @@ public class UIATools
         private const uint WM_LBUTTONDOWN = 0x0201;
         private const uint WM_LBUTTONUP   = 0x0202;
 
-        private const uint MOUSEEVENTF_MOVE     = 0x0001;
-        private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
-        private const uint MOUSEEVENTF_LEFTUP   = 0x0004;
-        private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
+        private const uint MOUSEEVENTF_MOVE      = 0x0001;
+        private const uint MOUSEEVENTF_LEFTDOWN  = 0x0002;
+        private const uint MOUSEEVENTF_LEFTUP    = 0x0004;
+        private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+        private const uint MOUSEEVENTF_RIGHTUP   = 0x0010;
+        private const uint MOUSEEVENTF_ABSOLUTE  = 0x8000;
 
         private const uint KEYEVENTF_KEYDOWN = 0x0000;
         private const uint KEYEVENTF_KEYUP   = 0x0002;
@@ -197,6 +211,10 @@ public class UIATools
         // 通常のInvokeやPatternの呼び出しでうまくいかない場合に使用する。
         // コントロールを含むウインドウが最前面にないと正確にクリックできないため、事前にウインドウを最前面にするなどの対策が必要。
         public static void ForceClick(AutomationElement element) {
+            ForceClick(element, ClickType.Left);
+        }
+
+        public static void ForceClick(AutomationElement element, ClickType clickType) {
             if (element == null) throw new Exception("オブジェクトが指定されていません.");
 
             // ClickablePointを取得
@@ -217,9 +235,29 @@ public class UIATools
             mouseInputs[0].mi.dy = absY;
             mouseInputs[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
             SendInput(1, mouseInputs, Marshal.SizeOf(new INPUT()));
-            mouseInputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE;
-            SendInput(1, mouseInputs, Marshal.SizeOf(new INPUT()));
-            mouseInputs[0].mi.dwFlags = MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE;
+
+            switch (clickType) {
+                case ClickType.Left:
+                    SendMouseInput(mouseInputs, MOUSEEVENTF_LEFTDOWN);
+                    SendMouseInput(mouseInputs, MOUSEEVENTF_LEFTUP);
+                    break;
+                case ClickType.Right:
+                    SendMouseInput(mouseInputs, MOUSEEVENTF_RIGHTDOWN);
+                    SendMouseInput(mouseInputs, MOUSEEVENTF_RIGHTUP);
+                    break;
+                case ClickType.Double:
+                    SendMouseInput(mouseInputs, MOUSEEVENTF_LEFTDOWN);
+                    SendMouseInput(mouseInputs, MOUSEEVENTF_LEFTUP);
+                    SendMouseInput(mouseInputs, MOUSEEVENTF_LEFTDOWN);
+                    SendMouseInput(mouseInputs, MOUSEEVENTF_LEFTUP);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException("clickType", clickType, null);
+            }
+        }
+
+        private static void SendMouseInput(INPUT[] mouseInputs, uint mouseEventFlag) {
+            mouseInputs[0].mi.dwFlags = mouseEventFlag | MOUSEEVENTF_ABSOLUTE;
             SendInput(1, mouseInputs, Marshal.SizeOf(new INPUT()));
         }
 
@@ -425,6 +463,7 @@ function Get-UIAChildWindows { param($Parent, $Id, $Name) Get-UIAControls -Paren
 
 function Get-UIAPane        { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Pane) }
 function Get-UIAPanes       { param($Parent, $Id, $Name) Get-UIAControls -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Pane) }
+function Get-UIAChildPane   { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Pane) -Scope ([Windows.Automation.TreeScope]::Children) }
 function Get-UIAChildPanes  { param($Parent, $Id, $Name) Get-UIAControls -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Pane) -Scope ([Windows.Automation.TreeScope]::Children) }
 
 function Get-UIAButton      { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::Button) }
@@ -441,6 +480,7 @@ function Get-UIARadio       { param($Parent, $Id, $Name) Get-UIAControl -Parent 
 function Get-UIARadios      { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::RadioButton) }
 function Get-UIAChildRadios { param($Parent, $Id, $Name) Get-UIAControls -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::RadioButton) -Scope ([Windows.Automation.TreeScope]::Children) }
 function Get-UIAMenuBar     { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::MenuBar) }
+function Get-UIAChildMenuBar{ param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::MenuBar) -Scope ([Windows.Automation.TreeScope]::Children) }
 function Get-UIAMenuItem    { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::MenuItem) }
 function Get-UIADataGrid    { param($Parent, $Id, $Name) Get-UIAControl -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::DataGrid) }
 function Get-UIADataItems   { param($Parent, $Id, $Name) Get-UIAControls -Parent $Parent -Id $Id -Name $Name -Type ([Windows.Automation.ControlType]::DataItem) }
@@ -457,14 +497,15 @@ function Invoke-UIAElement {
         [Windows.Automation.AutomationElement]$Element
     )
 
-    $invokePattern = $null
-    $togglePattern = $null
-    if ($Element.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern, [ref]$invokePattern)) {
-        $invokePattern.Invoke()
-    } elseif ($Element.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern, [ref]$togglePattern)) {
-        $togglePattern.Toggle()
+    $pattern = $null
+    if ($Element.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) {
+        $pattern.Invoke()
+    } elseif ($Element.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern, [ref]$pattern)) {
+        $pattern.Toggle()
+    } elseif ($Element.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern, [ref]$pattern)) {
+        $pattern.Select()
     } else {
-        throw "Invoke非対応の要素です"
+        throw "Invoke,Toggle,Select非対応の要素です"
     }
 }
 
@@ -596,12 +637,22 @@ function Get-UIAValue {
     )
 
     # 1. ValuePattern を持っている場合 (Edit, ComboBoxなど)
-    $valuePattern = $null
-    if ($Element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
+    $pattern = $null
+    if ($Element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
         return $valuePattern.Current.Value
     }
     
-    # 2. ValuePattern がない場合 (Text, Button, ListItemなど)
+    # 2. CheckBoxの場合
+    if ($Element.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern, [ref]$pattern)) {
+        return ($pattern.Current.ToggleState -eq [Windows.Automation.ToggleState]::On)
+    }
+
+    # 3. RadioButtonの場合
+    if ($Element.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern, [ref]$pattern)) {
+        return $pattern.Current.IsSelected
+    }
+
+    # 4. Pattern がない場合 (Text, Button, ListItemなど)
     # 多くの場合は Name プロパティに文字列が入っている - Get-UIAName を呼び出す
     return Get-UIAName $Element
 }
@@ -628,8 +679,10 @@ function Set-UIAValue {
         $valuePattern.SetValue($Value)
     } else {
         # コントロールにSendKey.SendWaitで送信する
-        $Element.SetFocus()
-        [UIATools]::Sleep(50)
+        try {
+            $Element.SetFocus()
+            [UIATools]::Sleep(50)
+        } catch {}
 
         if ($OmitEscape) {
             [System.Windows.Forms.SendKeys]::SendWait($Value)
@@ -695,7 +748,8 @@ function Set-UIAListSelection {
     #>
     param(
         [Parameter(Mandatory, Position = 0)] [Windows.Automation.AutomationElement]$List,
-        [Parameter(Mandatory, Position = 1)] [string]$Value
+        [Parameter(Mandatory, Position = 1)] [string]$Value,
+        [switch] [boolean]$UseMatch = $false
     )
 
     $listItems = Get-UIAListItems -Parent $List
@@ -705,10 +759,19 @@ function Set-UIAListSelection {
 
     $selectionPattern = $null
     foreach ($item in $listItems) {
-        if ($item.Current.Name -eq $Value) {
-            if ($item.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionPattern)) {
-                $selectionPattern.Select()
-                return
+        if ($UseMatch) {
+            if ($item.Current.Name -match $Value) {
+                if ($item.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionPattern)) {
+                    $selectionPattern.Select()
+                    return
+                }
+            }
+        } else {
+            if ($item.Current.Name -eq $Value) {
+                if ($item.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionPattern)) {
+                    $selectionPattern.Select()
+                    return
+                }
             }
         }
     }
