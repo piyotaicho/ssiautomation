@@ -1,4 +1,6 @@
 ﻿# エントランスの操作をする
+# Last update : 2026-06-11
+#
 if (-not ([System.Management.Automation.PSTypeName]'UIATools').Type) {
     throw 'Tools-AutomationCode.ps1を先にロードしてください'
 }
@@ -106,6 +108,71 @@ function Get-GairaiList {
     return @{
         Date = $displayedDateString
         List = $gairaiListData
+    }
+}
+
+# アプリを起動する
+function Invoke-EntranceLuncher {
+    Param (
+        [Parameter(Mandatory = $true)] [string]$Category,
+        [Parameter(Mandatory = $true)] [string]$ItemName
+    )
+
+    $appWindow = $null
+    try {
+        $appWindow = GetAppWindow -Name 'エントランス -*'
+    } catch {
+        Write-Error $_
+    }
+    if ($null -eq $appWindow) {
+        throw 'システムの状態が不正です. エントランスがみつかりません.'
+    }
+
+    $PaneContents = Get-UIAPane -Parent $appWindow -Id 'contents'
+    if ($null -eq $PaneContents) {
+        throw 'アプリケーションの構成が不正です.'
+    }
+    $PaneContents = Get-UIAPane -Parent $PaneContents -Id 'tlpContents'
+    if ($null -eq $PaneContents) {
+        throw 'アプリケーションの構成が不正です.'
+    }
+
+    # tlpContentsの下にあるPanesから必要なものを取得する - 速度重視でChildrenを使用する
+    $PaneCategory = $null
+    $PaneCategory = Get-UIAControl -Parent $PaneContents -Id 'flpBusinessItems' -Type ([Windows.Automation.ControlType]::Pane) -Scope ([Windows.Automation.TreeScope]::Children)
+    if ($null -eq $PaneCategory) {
+        throw 'アプリケーションの構成が不正です.'
+    }
+
+    $ButtonCategory = $null
+    try {
+        $ButtonCategory = Get-UIAButton -Parent $PaneCategory -Name $Category
+        Invoke-UIAElement $ButtonCategory | Out-Null
+    } catch {
+        Write-Error $_
+    }
+    if ($null -eq $ButtonCategory) {
+        throw "アプリのカテゴリー $Category がみつかりませんでした."
+    }
+
+    [UIATools]::Sleep(500)
+
+    # tlpContentsの下にあるPanesから必要なものを取得する - 速度重視でChildren
+    $PaneItems = $null
+    $PaneItems = Get-UIAControl -Parent $PaneContents -Id 'flpLauncherItems' -Type ([Windows.Automation.ControlType]::Pane) -Scope ([Windows.Automation.TreeScope]::Children)
+    if ($null -eq $PaneItems) {
+        throw 'アプリケーションの構成が不正です.'
+    }
+
+    $ButtonItem = $null
+    try {
+        $ButtonItem = Get-UIAButton -Parent $PaneItems -Name $ItemName
+        Invoke-UIAElement $ButtonItem | Out-Null
+    } catch {
+        Write-Error $_
+    }
+    if ($null -eq $ButtonItem) {
+        throw "アプリのアイテム $ItemName がみつかりませんでした."
     }
 }
 
