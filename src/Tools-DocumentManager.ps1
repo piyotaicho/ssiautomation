@@ -211,7 +211,7 @@ function New-DMDocument {
     Invoke-UIAForceClick -ParentWindow $shinkiDocWindow -Element $shinkiKensakuItem # 強制クリック
 
     # Excelの起動を待つ
-    [UIATools]::Sleep(3500)
+    [UIATools]::Sleep(3000)
 }
 
 # 新規画像ウインドウの内容を設定
