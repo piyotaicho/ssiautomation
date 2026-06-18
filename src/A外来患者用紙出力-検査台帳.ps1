@@ -49,18 +49,17 @@ try {
         # 新規文書を作成
         New-DMDocument -appWindow $appBunsyo -documentName '検査結果用紙台帳' | Out-Null
 
-        # 直近で起動した有効なExcelを抽出
-        $retryCount = 3
+        # 直近で起動した有効なExcelを抽出 タイムアウト10秒
         $newExcelHwnd = 0
-        while (($retryCount--) -gt 0) {
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        while ($stopwatch.Elapsed.TotalSeconds -le 10) {
             $newExcelProcs = (Get-Process -Name excel -ErrorAction SilentlyContinue | Where-Object { $_.Id -notin $excelPIDs -and $_.MainWindowHandle -ne 0})
             if ($newExcelProcs.Count -ge 1) {
                 $newExcelHwnd = $newExcelProcs[0].MainWindowHandle
                 break
             }
             Write-Host 'Getting Excel HWND again'
-            [UIATools]::Sleep(1000)
-            $retryCount--
+            [UIATools]::Sleep(800)
         }
 
         if (-not $newExcelHwnd) {
@@ -82,11 +81,17 @@ try {
             # 日付を取得していたら日付をセルに入力
             if ($entranceGairai.Date) {
                 $activesheet = $excel.ActiveSheet
+                if ($null -eq $activesheet) {
+                    throw 'Excelのシート取得に失敗しました'
+                }
+
                 if ($timeString) {
                     $activesheet.Range('R7').Value2 = "$($entranceGairai.Date) ($($timeString))"
                 } else {
                     $activesheet.Range('R7').Value2 = "$($entranceGairai.Date)"
                 }
+
+                # COM開放
                 [System.Runtime.InteropServices.Marshal]::ReleaseComObject($activesheet) | Out-Null
                 $activesheet = $null
             }
