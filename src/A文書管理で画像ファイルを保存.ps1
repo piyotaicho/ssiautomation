@@ -120,7 +120,9 @@ process {
 }
 
 end {
-    Close-DocumentManager
+    if ($null -ne $appWindow) {
+        Close-DocumentManager $appWindow
+    }
     if ($errorList.Count -gt 0) {
         Write-Error "登録に失敗した項目が ${errorList.Count} 件ありました。詳細は以下の通りです。"
         $errorList | ForEach-Object { Write-Host $_ }
