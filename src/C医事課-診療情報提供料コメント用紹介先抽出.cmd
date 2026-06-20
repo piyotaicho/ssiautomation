@@ -1,1 +1,1 @@
-powershell.exe -executionpolicy bypass -File "Y:\病院\医局\産婦人科\やまもと\解析\P診療情報提供料-紹介先医療機関名抽出.ps1"
+powershell.exe -executionpolicy bypass -c "& Y:\病院\医局\産婦人科\やまもと\解析\P診療情報提供料-紹介先医療機関名抽出.ps1 -noOverlay"
