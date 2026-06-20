@@ -1,7 +1,7 @@
 ﻿#
 # 整形外科　術前術後カンファレンスのリストをつくる
 # 術前：前の火曜日～月曜日
-# 術後：こんどの火曜日～次の月曜日
+# 術後：こんどの火曜日～次の火曜日
 #
 $templatePath = "$PSScriptRoot\template-整形オペカンファレンス.xlsx"
 
@@ -12,18 +12,16 @@ Start-Sleep -Milliseconds 500 # オーバーレイが起動するのを少し待
 # Step - 1 手術情報の取得
 
 # 抽出する日付の計算
-$startDate = Get-Date -Hour 0 -Minute 0 -Second 0
-if (([int]$startDate.DayOfWeek) -gt 2) {
-    $startDate = $startDate.AddDays(([int]$startDate.DayOfWeek)-8)
-} else {
-    $startDate = $startDate.AddDays(-(5+([int]$startDate.DayOfWeek)))
-}
-$endDate = $startDate.AddDays(13)
+$today = (Get-Date).Date
+$nextThuesday = $today.AddDays((2 - [int]$today.DayOfWeek + 7) % 7)
+
+$startDate = $nextThuesday.AddDays(-7).ToString('yyyy/MM/dd')
+$endDate = $nextThuesday.AddDays(7).ToString('yyyy/MM/dd')
 
 # 手術リストを取得
 $opeList = @()
 try {
-    $opeList = ( & "$PSScriptRoot\A手術一覧-取得.ps1" -startDate $startDate.ToString('yyyy/MM/dd') -endDate $endDate.ToString('yyyy/MM/dd') -ka '11')
+    $opeList = ( & "$PSScriptRoot\A手術一覧-取得.ps1" -startDate $startDate -endDate $endDate -ka '11')
 } catch {
     throw $_
 }
@@ -40,9 +38,13 @@ if ($opeList.Count -eq 0) {
 
 # Step - 2 リストの印刷
 
+Stop-Process -Id $overlay.Id -ErrorAction SilentlyContinue
+
+$overlay = Start-Process powershell.exe -PassThru -ArgumentList "-ExecutionPolicy bypass -WindowStyle Hidden -File $PSScriptRoot\Utility-Overlay.ps1 -Message '印刷中、もうちょっと待っててね' -Color '#55FF8000'"
+Start-Sleep -Milliseconds 500 # オーバーレイが起動するのを少し待つ
+
 # カンファレンスの日のシリアル値で術前後を区分する
-$meetingDate = $startDate.AddDays(7)
-$thresholdSerial = ($meetingDate - (Get-Date '1900/1/1 0:0:0')).TotalDays + 1
+$thresholdSerial = ($nextThuesday - (Get-Date '1900/1/1 0:0:0')).TotalDays + 1
 
 # エクセルでの操作
 $COMexcel = $null
@@ -59,9 +61,9 @@ try {
 
     # ワークシートに値を割り当ててゆく　1ページ20件　術前術後でわける
     $title = $COMsheet.Cells.Item(1, 8).Value2
-    $title = $title -replace 'yyyy', $meetingDate.ToString('yyyy')
-    $title = $title -replace 'mmm', $meetingDate.ToString('  M')
-    $title = $title -replace 'ddd', $meetingDate.ToString('  d')
+    $title = $title -replace 'yyyy', $nextThuesday.ToString('yyyy')
+    $title = $title -replace 'mmm', $nextThuesday.ToString('  M')
+    $title = $title -replace 'ddd', $nextThuesday.ToString('  d')
     $COMsheet.Cells.Item(1, 8).Value2 = $title
 
     # ループ
