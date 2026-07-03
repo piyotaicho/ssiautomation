@@ -157,8 +157,9 @@ try {
 
     try {
         $automationtimeout = [System.Diagnostics.Stopwatch]::StartNew()
-        while ($automationtimeout.Elapsed.TotalSeconds -lt 300) {
-            # エクセルのプロセスを取得
+        # 情報の取得は最長で3分
+        while ($automationtimeout.Elapsed.TotalSeconds -lt 180) {
+            # エクセルのプロセスを取得 30秒まで待機する
             $previewExcel = @()
             $excelWait = [System.Diagnostics.Stopwatch]::StartNew()
             while ($excelWait.Elapsed.TotalSeconds -lt 30) {
@@ -179,7 +180,7 @@ try {
                 }
             }
             
-            # エクセルのオートメーションを開始
+            # エクセルのプロセスに接続してオートメーションを開始
             if ($previewExcel.Count -eq 0) {
                 break
             }
@@ -216,7 +217,7 @@ try {
             [System.Runtime.InteropServices.Marshal]::ReleaseComObject($COMworkbook) | Out-Null
             [System.Runtime.InteropServices.Marshal]::ReleaseComObject($COMexcel) | Out-Null
 
-            [UIATools]::Sleep(500)
+            [UIATools]::Sleep(3000)
         }
     } catch {
         #Write-Error $_
