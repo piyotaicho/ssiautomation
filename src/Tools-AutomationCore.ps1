@@ -639,7 +639,7 @@ function Get-UIAValue {
     # 1. ValuePattern を持っている場合 (Edit, ComboBoxなど)
     $pattern = $null
     if ($Element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
-        return $valuePattern.Current.Value
+        return $pattern.Current.Value
     }
     
     # 2. CheckBoxの場合
