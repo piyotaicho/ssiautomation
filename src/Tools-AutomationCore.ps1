@@ -67,9 +67,6 @@ public class UIATools
         static extern bool SetForegroundWindow(IntPtr hWnd);
 
         [DllImport("user32.dll")]
-        static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
-
-        [DllImport("user32.dll")]
         static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll")]
@@ -90,10 +87,12 @@ public class UIATools
         [DllImport("imm32.dll")]
         static extern bool ImmReleaseContext(IntPtr hWnd, IntPtr hIMC);
 
+        // PostMessage用の定数
         private const uint WK_LBUTTON     = 0x0001;
         private const uint WM_LBUTTONDOWN = 0x0201;
         private const uint WM_LBUTTONUP   = 0x0202;
 
+        // SendInput用の定数
         private const uint MOUSEEVENTF_MOVE      = 0x0001;
         private const uint MOUSEEVENTF_LEFTDOWN  = 0x0002;
         private const uint MOUSEEVENTF_LEFTUP    = 0x0004;
@@ -107,6 +106,7 @@ public class UIATools
         private const int SM_CXSCREEN = 0;
         private const int SM_CYSCREEN = 1;
 
+        // AutomationElement.RootElementを返すプロパティ
         public static AutomationElement RootElement
         {
             get
@@ -178,6 +178,18 @@ public class UIATools
                 new PropertyCondition(AutomationElement.AutomationIdProperty, automationId)
             );
             return RootElement.FindFirst(TreeScope.Element | TreeScope.Children, cond);
+        }
+
+        // オートメーションエレメントがWindowであった場合
+        // SetForegroundWindow() を呼び出してウインドウを最前面にするユーティリティ関数
+        public static void SetForegroundWindow(AutomationElement windowElement) {
+            if (windowElement == null) throw new Exception("オブジェクトが指定されていません.");
+            if (windowElement.Current.ControlType != ControlType.Window) throw new Exception("Window以外の要素はSetForegroundWindowできません.");
+
+            IntPtr hWnd = (IntPtr)windowElement.Current.NativeWindowHandle;
+            if (hWnd == IntPtr.Zero) throw new Exception("親Windowsのハンドルが取得できません.");
+
+            SetForegroundWindow(hWnd);
         }
 
         // UIオートメーションの要素をクリックするユーティリティ関数。
@@ -261,9 +273,10 @@ public class UIATools
             SendInput(1, mouseInputs, Marshal.SizeOf(new INPUT()));
         }
 
-        // IMEの状態をoffにする
+        // IMEの状態をoffにする(実験的実装)
         // 最前面のウインドウに限るのでコントロールにSetFocus()してウインドウを前面に移動しておく対応が必要。
         public static void DisableIME() {
+            // デスクトップなどhWnd = 0 の場合動作せず終了
             IntPtr hWnd = GetForegroundWindow();
             if (hWnd == IntPtr.Zero) return;
 
@@ -283,20 +296,7 @@ public class UIATools
             Thread.Sleep(200);
         }
 
-        public static void Sleep(int milliseconds) {
-            Thread.Sleep(milliseconds);
-        }
-
-        public static void Sleep(int? milliseconds, int? seconds) {
-            if (seconds.HasValue && milliseconds.HasValue) {
-                throw new Exception("-Seconds と -Milliseconds は同時に指定できません");
-            }
-
-            if (seconds.HasValue) {
-                Thread.Sleep(seconds.Value * 1000);
-                return;
-            }
-
+        public static void Sleep(int? milliseconds) {
             if (milliseconds.HasValue) {
                 Thread.Sleep(milliseconds.Value);
                 return;
